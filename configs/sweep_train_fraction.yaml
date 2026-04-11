@@ -1,0 +1,5 @@
+# Sweep over training data fractions to study data efficiency and grokking onset.
+base_config: configs/base.yaml
+sweep:
+  train_fraction: [0.2, 0.3, 0.4, 0.5, 0.6, 0.8]
+  seed: [0, 1, 2]

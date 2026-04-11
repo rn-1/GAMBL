@@ -1,0 +1,5 @@
+# Sweep comparing transformer vs MLP across multiple seeds.
+base_config: configs/base.yaml
+sweep:
+  model: [transformer, mlp]
+  seed: [0, 1, 2]

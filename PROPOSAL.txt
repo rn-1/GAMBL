@@ -1,0 +1,41 @@
+GaMBL: Grokking across Models, Benchmarks, and LLMs
+
+Research Question
+Our project investigates the conditions under which grokking occurs across a range of model architectures, including large language models (LLMs), smaller transformer-based models, and other neural networks such as multilayer perceptrons (MLPs). 
+
+Why This Question Is Interesting
+Grokking is the phenomenon where a model first memorizes the training data and only much later begins to generalize well. We want to study whether this behavior is specific to certain architectures or whether it appears more broadly across models when the right training conditions are present. We are also interested in whether grokking-like behavior can be meaningfully observed across different datasets.
+Understanding when this happens across different model classes could provide insight into how learning dynamics differ between architectures and whether delayed generalization is a broader property of modern neural networks. Including LLMs in this project makes the question even more compelling, since it may help us think about whether the training dynamics observed in smaller controlled settings have analogs in large-scale language models while also having applicability to much of modern AI.
+Data and Datasets
+We plan to use a combination of controlled synthetic datasets and, if feasible, language-model-style datasets. We will likely first try to reproduce grokking on small algorithmic tasks such as modular arithmetic or other structured rule-based problems where it has already been observed. We may then compare behavior on more language-oriented or sequence-based tasks using simplified text datasets or small-scale language modeling data. This will allow us to test whether delayed generalization appears only in toy settings or also in problems that more closely resemble those used to train language models. Our goal is to use datasets where memorization and generalization can be separated clearly and tracked throughout training.
+Algorithms and Models
+We plan to compare several types of models, including:
+multilayer perceptrons (MLPs)
+small transformers
+language-model-style transformer architectures
+possibly a pretrained or small-scale large language model setup, depending on feasibility
+Experiments and Analysis
+Our experiments will focus on identifying the conditions under which grokking appears and comparing how those conditions differ across models. We plan to vary:
+dataset 
+Model size
+architecture type
+regularization strength
+number of training steps
+possibly task type
+
+
+For each setting, we will track training and test performance over time and look for the characteristic delayed generalization pattern associated with grokking. We also plan to compare whether grokking appears more clearly in some architectures than others.
+If we have time, we want to perform preliminary interpretability analysis by examining intermediate checkpoints and comparing internal representations before and after grokking-like transitions.
+Plan for the Pre-Final Report and Check-In
+By the pre-final report and check-in, we plan to have:
+finalized the tasks and datasets we will use,
+selected the set of models we want to compare, implemented baseline training pipelines,
+reproduced or identified at least one setting where grokking occurs,
+run initial comparisons across architectures and training conditions, and
+begun preliminary analysis of the training dynamics
+Literature review across different grokking papers
+
+Previous Work
+https://arxiv.org/abs/2306.13253
+https://arxiv.org/pdf/2201.02177
+https://arxiv.org/html/2502.01774v1#S1 

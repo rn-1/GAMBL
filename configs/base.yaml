@@ -1,0 +1,26 @@
+# Default hyperparameters matching Power et al. (2022) "Grokking" setup.
+# These are the canonical settings for reproducing grokking on modular arithmetic.
+model: transformer
+dataset: modular_arithmetic
+prime: 97
+operation: "+"
+train_fraction: 0.5
+d_model: 128
+n_layers: 2
+n_heads: 4
+d_ff: 512
+dropout: 0.1
+pool: last
+embed_dim: 128        # MLP embedding dim
+hidden_dim: 512       # MLP hidden dim
+num_mlp_layers: 3     # MLP total layers
+activation: relu      # MLP activation
+lr: 0.001
+weight_decay: 1.0     # CRITICAL: must be high for grokking to occur
+betas: [0.9, 0.98]
+n_steps: 100000
+batch_size: -1        # -1 = full-batch (all training data per step)
+log_every: 100
+checkpoint_every: 500
+seed: 42
+results_dir: results

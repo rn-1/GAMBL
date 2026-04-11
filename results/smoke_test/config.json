@@ -1,0 +1,32 @@
+{
+  "dataset": "modular_arithmetic",
+  "prime": 97,
+  "operation": "+",
+  "train_fraction": 0.5,
+  "model": "transformer",
+  "d_model": 128,
+  "n_layers": 2,
+  "n_heads": 4,
+  "d_ff": 512,
+  "dropout": 0.1,
+  "pool": "last",
+  "no_pos_encoding": false,
+  "embed_dim": 128,
+  "hidden_dim": 512,
+  "num_mlp_layers": 3,
+  "activation": "relu",
+  "lr": 0.001,
+  "weight_decay": 1.0,
+  "betas": [
+    0.9,
+    0.98
+  ],
+  "n_steps": 500,
+  "batch_size": -1,
+  "log_every": 100,
+  "checkpoint_every": 200,
+  "exp_name": "smoke_test",
+  "results_dir": "results",
+  "seed": 42,
+  "device": "auto"
+}

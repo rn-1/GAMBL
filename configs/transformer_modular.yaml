@@ -1,0 +1,10 @@
+# Transformer on modular arithmetic — canonical grokking reproduction.
+# Inherits base.yaml defaults.
+base_config: configs/base.yaml
+model: transformer
+prime: 97
+operation: "+"
+train_fraction: 0.5
+weight_decay: 1.0
+n_steps: 100000
+seed: 42

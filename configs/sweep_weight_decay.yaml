@@ -1,0 +1,7 @@
+# Sweep over weight decay values to study its role in grokking.
+# Each combination of weight_decay × seed will be run independently.
+# Run with: python run_experiment.py configs/sweep_weight_decay.yaml
+base_config: configs/base.yaml
+sweep:
+  weight_decay: [0.0, 0.1, 0.5, 1.0, 5.0]
+  seed: [0, 1, 2]
