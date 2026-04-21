@@ -8,13 +8,16 @@
 #SBATCH --output=/home1/plwang/GAMBL/logs/single_%j.out
 #SBATCH --error=/home1/plwang/GAMBL/logs/single_%j.err
 
+# Canonical grokking reproduction (Power et al. 2022 settings).
+# dropout=0.0 is critical — dropout prevents the clean memorization phase
+# that grokking requires.
+#
 # Usage:
 #   sbatch run_single.sh                      # canonical transformer baseline
 #   sbatch run_single.sh --model mlp          # MLP instead
-#   sbatch run_single.sh --weight_decay 0.0   # no weight decay
+#   sbatch run_single.sh --weight_decay 0.0   # no weight decay (control)
 
 set -euo pipefail
-set -x
 
 PROJECT=/home1/plwang/GAMBL
 RESULTS=/scratch1/plwang/gambl_results
@@ -34,6 +37,7 @@ echo "Started:  $(date)"
 python train.py \
     --model transformer \
     --n_steps 100000 \
+    --dropout 0.0 \
     --results_dir "$RESULTS" \
     --device auto \
     "$@"

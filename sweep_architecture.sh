@@ -11,6 +11,8 @@
 
 # Sweep: model in [transformer, mlp] x seed in [0, 1, 2]
 # = 6 jobs total.
+# dropout=0.0 throughout for fair comparison.
+# Key question: does MLP also grokk, or is it transformer-specific?
 
 set -euo pipefail
 
@@ -42,6 +44,7 @@ echo "Started:  $(date)"
 python train.py \
     --model "$MODEL" \
     --seed "$SEED" \
+    --dropout 0.0 \
     --n_steps 100000 \
     --results_dir "$RESULTS" \
     --device auto
