@@ -49,6 +49,7 @@ class MLP(nn.Module):
         output_dim: int = 97,
         activation: str = 'relu',
         dropout: float = 0.0,
+        seq_len: int = 4,
     ):
         super().__init__()
         if activation not in ACTIVATIONS:
@@ -59,7 +60,6 @@ class MLP(nn.Module):
         self.embedding = nn.Embedding(vocab_size, embed_dim)
 
         act_cls = ACTIVATIONS[activation]
-        seq_len = 4  # [a, op, b, eq]
         input_dim = embed_dim * seq_len
 
         layers = []

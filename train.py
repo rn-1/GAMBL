@@ -33,6 +33,11 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from data.modular_arithmetic import get_modular_arithmetic_datasets, get_vocab_size
+from data.text_classification import (
+    get_trec_datasets,
+    get_vocab_size as get_trec_vocab_size,
+    get_num_classes as get_trec_num_classes,
+)
 from models.mlp import MLP
 from models.transformer import GrokTransformer
 
@@ -49,8 +54,10 @@ def parse_args(argv=None) -> argparse.Namespace:
 
     # Dataset
     p.add_argument('--dataset', type=str, default='modular_arithmetic',
-                   choices=['modular_arithmetic'],
+                   choices=['modular_arithmetic', 'trec'],
                    help='Dataset to use.')
+    p.add_argument('--max_seq_len', type=int, default=64,
+                   help='Max sequence length for text datasets (TREC etc.).')
     p.add_argument('--prime', type=int, default=97,
                    help='Prime modulus p for modular arithmetic.')
     p.add_argument('--operation', type=str, default='+',
@@ -135,13 +142,21 @@ def get_device(device_str: str) -> torch.device:
 
 
 def make_exp_name(args) -> str:
-    op_name = {'+': 'plus', '-': 'minus', '*': 'times', '/': 'div'}[args.operation]
-    return (
-        f"{args.model}_mod{args.prime}_{op_name}"
-        f"_wd{args.weight_decay}"
-        f"_frac{args.train_fraction}"
-        f"_seed{args.seed}"
-    )
+    if args.dataset == 'modular_arithmetic':
+        op_name = {'+': 'plus', '-': 'minus', '*': 'times', '/': 'div'}[args.operation]
+        return (
+            f"{args.model}_mod{args.prime}_{op_name}"
+            f"_wd{args.weight_decay}"
+            f"_frac{args.train_fraction}"
+            f"_seed{args.seed}"
+        )
+    else:
+        return (
+            f"{args.model}_{args.dataset}"
+            f"_wd{args.weight_decay}"
+            f"_frac{args.train_fraction}"
+            f"_seed{args.seed}"
+        )
 
 
 def compute_accuracy(logits: torch.Tensor, labels: torch.Tensor) -> float:
@@ -150,7 +165,7 @@ def compute_accuracy(logits: torch.Tensor, labels: torch.Tensor) -> float:
 
 
 def build_datasets(args):
-    """Return (train_ds, test_ds, vocab_size, output_dim)."""
+    """Return (train_ds, test_ds, vocab_size, output_dim, seq_len)."""
     if args.dataset == 'modular_arithmetic':
         train_ds, test_ds = get_modular_arithmetic_datasets(
             p=args.prime,
@@ -160,12 +175,23 @@ def build_datasets(args):
         )
         vocab_size = get_vocab_size(args.prime)
         output_dim = args.prime
-        return train_ds, test_ds, vocab_size, output_dim
+        seq_len = 4
+        return train_ds, test_ds, vocab_size, output_dim, seq_len
+    elif args.dataset == 'trec':
+        train_ds, test_ds = get_trec_datasets(
+            max_seq_len=args.max_seq_len,
+            train_fraction=args.train_fraction,
+            seed=args.seed,
+        )
+        vocab_size = get_trec_vocab_size()
+        output_dim = get_trec_num_classes()
+        seq_len = args.max_seq_len
+        return train_ds, test_ds, vocab_size, output_dim, seq_len
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
 
 
-def build_model(args, vocab_size: int, output_dim: int) -> nn.Module:
+def build_model(args, vocab_size: int, output_dim: int, seq_len: int) -> nn.Module:
     if args.model == 'transformer':
         return GrokTransformer(
             vocab_size=vocab_size,
@@ -174,7 +200,7 @@ def build_model(args, vocab_size: int, output_dim: int) -> nn.Module:
             n_layers=args.n_layers,
             d_ff=args.d_ff,
             output_dim=output_dim,
-            max_seq_len=4,
+            max_seq_len=seq_len,
             dropout=args.dropout,
             use_positional_encoding=not args.no_pos_encoding,
             pool=args.pool,
@@ -188,6 +214,7 @@ def build_model(args, vocab_size: int, output_dim: int) -> nn.Module:
             output_dim=output_dim,
             activation=args.activation,
             dropout=args.dropout,
+            seq_len=seq_len,
         )
     else:
         raise ValueError(f"Unknown model: {args.model}")
@@ -231,7 +258,7 @@ def train(args):
     print(f"Device: {device}")
 
     # ---- data -----------------------------------------------------------
-    train_ds, test_ds, vocab_size, output_dim = build_datasets(args)
+    train_ds, test_ds, vocab_size, output_dim, seq_len = build_datasets(args)
     print(f"Train size: {len(train_ds)}, Test size: {len(test_ds)}, "
           f"Vocab size: {vocab_size}, Output dim: {output_dim}")
 
@@ -245,7 +272,7 @@ def train(args):
     train_labels = train_ds.labels.to(device)
 
     # ---- model ----------------------------------------------------------
-    model = build_model(args, vocab_size=vocab_size, output_dim=output_dim).to(device)
+    model = build_model(args, vocab_size=vocab_size, output_dim=output_dim, seq_len=seq_len).to(device)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model: {args.model}, Parameters: {n_params:,}")
 

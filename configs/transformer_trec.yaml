@@ -1,0 +1,13 @@
+# Transformer on TREC question classification.
+# 6 classes, ~5452 examples split 80/20 train/test.
+# Grokking hypothesis: with high weight decay, model should memorize first
+# then transition to systematic generalization of question type patterns.
+base_config: configs/base.yaml
+dataset: trec
+model: transformer
+max_seq_len: 64
+train_fraction: 0.8
+weight_decay: 1.0
+n_steps: 100000
+seed: 42
+# Note: batch_size=-1 (full batch) with ~4361 train examples
