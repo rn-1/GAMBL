@@ -11,6 +11,8 @@
 
 # Sweep: train_fraction in [0.2, 0.3, 0.4, 0.5, 0.6, 0.8] x seed in [0, 1, 2]
 # = 18 jobs total.
+# dropout=0.0 throughout.
+# Expected: lower fractions → earlier/sharper grokking (less data = harder to memorize).
 
 set -euo pipefail
 
@@ -43,6 +45,7 @@ python train.py \
     --model transformer \
     --train_fraction "$FRAC" \
     --seed "$SEED" \
+    --dropout 0.0 \
     --n_steps 100000 \
     --results_dir "$RESULTS" \
     --device auto

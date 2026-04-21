@@ -11,6 +11,8 @@
 
 # Sweep: weight_decay in [0.0, 0.1, 0.5, 1.0, 5.0] x seed in [0, 1, 2]
 # = 15 jobs total.
+# dropout=0.0 throughout — required for clean grokking.
+# Expected result: only wd >= 0.5 should show grokking; wd=0.0 should not.
 
 set -euo pipefail
 
@@ -43,6 +45,7 @@ python train.py \
     --model transformer \
     --weight_decay "$WD" \
     --seed "$SEED" \
+    --dropout 0.0 \
     --n_steps 100000 \
     --results_dir "$RESULTS" \
     --device auto
