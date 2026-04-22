@@ -34,6 +34,7 @@ from torch.utils.data import DataLoader
 
 from data.modular_arithmetic import get_modular_arithmetic_datasets, get_vocab_size
 from data.text_datasets import get_text_datasets, list_datasets as list_text_datasets
+from data.analogy import get_analogy_datasets, get_analogy_vocab_size, SEQ_LEN as ANALOGY_SEQ_LEN
 from models.mlp import MLP
 from models.transformer import GrokTransformer
 
@@ -50,10 +51,15 @@ def parse_args(argv=None) -> argparse.Namespace:
 
     # Dataset
     p.add_argument('--dataset', type=str, default='modular_arithmetic',
-                   choices=['modular_arithmetic', 'text'],
-                   help='Dataset family. Use "text" for HuggingFace text tasks.')
+                   choices=['modular_arithmetic', 'text', 'analogy'],
+                   help='Dataset family.')
     p.add_argument('--prime', type=int, default=97,
                    help='Prime modulus p for modular arithmetic.')
+    # Analogy-dataset-specific
+    p.add_argument('--analogy_rows', type=int, default=5,
+                   help='P: number of rows in the entity grid (Z_P component) for analogy dataset.')
+    p.add_argument('--analogy_cols', type=int, default=5,
+                   help='Q: number of columns in the entity grid (Z_Q component) for analogy dataset.')
     p.add_argument('--operation', type=str, default='+',
                    choices=['+', '-', '*', '/'],
                    help='Arithmetic operation.')
@@ -147,6 +153,9 @@ def get_device(device_str: str) -> torch.device:
 
 
 def make_exp_name(args) -> str:
+    size_sfx = f"_d{args.d_model}_l{args.n_layers}" if (args.d_model != 128 or args.n_layers != 2) else ""
+    drop_sfx = f"_do{args.dropout}"                 if  args.dropout != 0.1                        else ""
+
     if args.dataset == 'modular_arithmetic':
         op_name = {'+': 'plus', '-': 'minus', '*': 'times', '/': 'div'}[args.operation]
         return (
@@ -154,6 +163,15 @@ def make_exp_name(args) -> str:
             f"_wd{args.weight_decay}"
             f"_frac{args.train_fraction}"
             f"_seed{args.seed}"
+            f"{size_sfx}{drop_sfx}"
+        )
+    elif args.dataset == 'analogy':
+        return (
+            f"{args.model}_analogy_p{args.analogy_rows}q{args.analogy_cols}"
+            f"_wd{args.weight_decay}"
+            f"_frac{args.train_fraction}"
+            f"_seed{args.seed}"
+            f"{size_sfx}{drop_sfx}"
         )
     else:
         return (
@@ -161,6 +179,7 @@ def make_exp_name(args) -> str:
             f"_wd{args.weight_decay}"
             f"_frac{args.train_fraction}"
             f"_seed{args.seed}"
+            f"{size_sfx}{drop_sfx}"
         )
 
 
@@ -170,7 +189,7 @@ def compute_accuracy(logits: torch.Tensor, labels: torch.Tensor) -> float:
 
 
 def build_datasets(args):
-    """Return (train_ds, test_ds, vocab_size, output_dim)."""
+    """Return (train_ds, test_ds, vocab_size, output_dim, seq_len)."""
     if args.dataset == 'modular_arithmetic':
         train_ds, test_ds = get_modular_arithmetic_datasets(
             p=args.prime,
@@ -180,7 +199,17 @@ def build_datasets(args):
         )
         vocab_size = get_vocab_size(args.prime)
         output_dim = args.prime
-        return train_ds, test_ds, vocab_size, output_dim
+        return train_ds, test_ds, vocab_size, output_dim, args.max_seq_len
+    elif args.dataset == 'analogy':
+        train_ds, test_ds = get_analogy_datasets(
+            p=args.analogy_rows,
+            q=args.analogy_cols,
+            train_fraction=args.train_fraction,
+            seed=args.seed,
+        )
+        vocab_size = get_analogy_vocab_size(args.analogy_rows, args.analogy_cols)
+        output_dim = args.analogy_rows * args.analogy_cols
+        return train_ds, test_ds, vocab_size, output_dim, ANALOGY_SEQ_LEN
     elif args.dataset == 'text':
         if args.hf_dataset is None:
             raise ValueError("--hf_dataset is required when --dataset text")
@@ -192,7 +221,7 @@ def build_datasets(args):
             max_seq_len=args.max_seq_len,
             max_dataset_size=args.max_dataset_size,
         )
-        return train_ds, test_ds, vocab_size, num_classes
+        return train_ds, test_ds, vocab_size, num_classes, args.max_seq_len
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
 
@@ -264,15 +293,15 @@ def train(args):
     print(f"Device: {device}")
 
     # ---- data -----------------------------------------------------------
-    train_ds, test_ds, vocab_size, output_dim = build_datasets(args)
+    train_ds, test_ds, vocab_size, output_dim, seq_len = build_datasets(args)
     print(f"Train size: {len(train_ds)}, Test size: {len(test_ds)}, "
-          f"Vocab size: {vocab_size}, Output dim: {output_dim}")
+          f"Vocab size: {vocab_size}, Output dim: {output_dim}, Seq len: {seq_len}")
 
     batch_size = len(train_ds) if args.batch_size == -1 else args.batch_size
     train_loader = make_infinite_loader(train_ds, batch_size=batch_size)
 
     # For evaluation, load everything at once.
-    # TextDataset exposes a padding_mask attribute; ModularArithmeticDataset does not.
+    # TextDataset exposes a padding_mask attribute; the others do not.
     test_inputs  = test_ds.inputs.to(device)
     test_labels  = test_ds.labels.to(device)
     train_inputs = train_ds.inputs.to(device)
@@ -283,6 +312,7 @@ def train(args):
     if train_mask is not None: train_mask = train_mask.to(device)
 
     # ---- model ----------------------------------------------------------
+    args.max_seq_len = seq_len  # ensure model positional embeddings match the dataset
     model = build_model(args, vocab_size=vocab_size, output_dim=output_dim).to(device)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model: {args.model}, Parameters: {n_params:,}")

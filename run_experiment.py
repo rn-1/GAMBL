@@ -42,12 +42,19 @@ def load_yaml(path: str) -> dict:
         return yaml.safe_load(f) or {}
 
 
-def load_sweep_config(sweep_path: str) -> tuple[dict, dict]:
+def load_sweep_config(sweep_path: str) -> tuple[dict, dict, list[dict]]:
     """
-    Load a sweep config YAML. Returns (base_params, sweep_grid).
+    Load a sweep config YAML.
 
-    base_params: flat dict of fixed hyperparameter overrides.
-    sweep_grid:  dict mapping param name → list of values to sweep.
+    Returns:
+        base_params: flat dict of fixed hyperparameter overrides.
+        sweep_grid:  dict mapping param name → list of values (Cartesian product).
+        sweep_zip:   list of dicts that vary together (no Cartesian expansion).
+
+    sweep_zip example — vary d_model/n_heads/d_ff as a unit:
+        sweep_zip:
+          - {d_model: 64,  n_heads: 2, d_ff: 256}
+          - {d_model: 256, n_heads: 8, d_ff: 1024}
     """
     cfg = load_yaml(sweep_path)
 
@@ -57,34 +64,49 @@ def load_sweep_config(sweep_path: str) -> tuple[dict, dict]:
         base_cfg = load_yaml(cfg['base_config'])
         base_params.update(base_cfg)
         # Remove meta-keys that aren't train.py args
-        base_params.pop('base_config', None)
-        base_params.pop('sweep', None)
+        for meta in ('base_config', 'sweep', 'sweep_zip'):
+            base_params.pop(meta, None)
 
-    # Override base with any fixed params in the sweep config (non-sweep keys)
+    # Override base with any fixed params in the sweep config (non-meta keys)
     sweep_grid = cfg.get('sweep', {})
+    sweep_zip  = cfg.get('sweep_zip', [])
     for k, v in cfg.items():
-        if k not in ('base_config', 'sweep'):
+        if k not in ('base_config', 'sweep', 'sweep_zip'):
             base_params[k] = v
 
-    return base_params, sweep_grid
+    return base_params, sweep_grid, sweep_zip
 
 
-def expand_sweep(sweep_grid: dict) -> list[dict]:
+def expand_sweep(sweep_grid: dict, sweep_zip: list[dict] | None = None) -> list[dict]:
     """
-    Expand a sweep grid into a list of override dicts (Cartesian product).
+    Expand a sweep into a list of override dicts.
 
-    Example:
-      {'weight_decay': [0.1, 1.0], 'seed': [0, 1]}
-      → [{'weight_decay': 0.1, 'seed': 0},
-         {'weight_decay': 0.1, 'seed': 1},
-         {'weight_decay': 1.0, 'seed': 0},
-         {'weight_decay': 1.0, 'seed': 1}]
+    sweep_grid is expanded via Cartesian product.  sweep_zip entries are then
+    crossed with every grid combo (but not with each other), so they vary as a
+    unit rather than independently.
+
+    Examples:
+      grid={'wd': [0.1, 1.0], 'seed': [0, 1]}, zip=None
+        → 4 combos (standard Cartesian)
+
+      grid={'n_layers': [1, 2]}, zip=[{d_model:64, d_ff:256}, {d_model:256, d_ff:1024}]
+        → 4 combos: each n_layers value paired with each zip entry
     """
-    if not sweep_grid:
-        return [{}]
-    keys = list(sweep_grid.keys())
-    values = [sweep_grid[k] for k in keys]
-    return [dict(zip(keys, combo)) for combo in itertools.product(*values)]
+    if sweep_grid:
+        keys   = list(sweep_grid.keys())
+        values = [sweep_grid[k] for k in keys]
+        grid_combos = [dict(zip(keys, combo)) for combo in itertools.product(*values)]
+    else:
+        grid_combos = [{}]
+
+    if not sweep_zip:
+        return grid_combos
+
+    return [
+        {**grid_combo, **zip_entry}
+        for grid_combo in grid_combos
+        for zip_entry  in sweep_zip
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -92,14 +114,30 @@ def expand_sweep(sweep_grid: dict) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def make_exp_name(params: dict) -> str:
-    model = params.get('model', 'transformer')
-    wd    = params.get('weight_decay', 1.0)
-    frac  = params.get('train_fraction', 0.5)
-    seed  = params.get('seed', 42)
+    model    = params.get('model', 'transformer')
+    wd       = params.get('weight_decay', 1.0)
+    frac     = params.get('train_fraction', 0.5)
+    seed     = params.get('seed', 42)
+    d_model  = params.get('d_model', 128)
+    n_layers = params.get('n_layers', 2)
+    dropout  = params.get('dropout', 0.1)
 
-    if params.get('dataset', 'modular_arithmetic') == 'text':
+    # Append suffixes only when params deviate from base.yaml defaults so that
+    # standard runs keep their original names and model-size / regularization
+    # sweep runs get unambiguous, non-colliding names.
+    size_sfx = f"_d{d_model}_l{n_layers}" if (d_model != 128 or n_layers != 2) else ""
+    drop_sfx = f"_do{dropout}"            if  dropout != 0.1                    else ""
+
+    dataset = params.get('dataset', 'modular_arithmetic')
+
+    if dataset == 'text':
         hf_dataset = params.get('hf_dataset', 'unknown')
-        return f"{model}_text_{hf_dataset}_wd{wd}_frac{frac}_seed{seed}"
+        return f"{model}_text_{hf_dataset}_wd{wd}_frac{frac}_seed{seed}{size_sfx}{drop_sfx}"
+
+    if dataset == 'analogy':
+        p = params.get('analogy_rows', 5)
+        q = params.get('analogy_cols', 5)
+        return f"{model}_analogy_p{p}q{q}_wd{wd}_frac{frac}_seed{seed}{size_sfx}{drop_sfx}"
 
     op_name = {'+': 'plus', '-': 'minus', '*': 'times', '/': 'div'}.get(
         params.get('operation', '+'), params.get('operation', '+')
@@ -111,6 +149,8 @@ def make_exp_name(params: dict) -> str:
         f"_wd{wd}"
         f"_frac{frac}"
         f"_seed{seed}"
+        f"{size_sfx}"
+        f"{drop_sfx}"
     )
 
 
@@ -208,8 +248,8 @@ def main():
                         help='Override results_dir from base config.')
     args = parser.parse_args()
 
-    base_params, sweep_grid = load_sweep_config(args.config)
-    overrides = expand_sweep(sweep_grid)
+    base_params, sweep_grid, sweep_zip = load_sweep_config(args.config)
+    overrides = expand_sweep(sweep_grid, sweep_zip)
 
     # Build full param dicts for each combination
     all_params = []

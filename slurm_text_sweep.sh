@@ -41,6 +41,22 @@ conda activate nanopore
 cd /scratch1/rnene/csci567
 mkdir -p logs "$HF_HOME"
 
+# Serialize dataset downloads across array tasks so they don't race on the
+# shared cache.  The first task to acquire the lock downloads everything;
+# subsequent tasks wait, then skip via the sentinel file.
+_SENTINEL="$HF_HOME/.datasets_ready"
+_LOCKFILE="$HF_HOME/.download.lock"
+if [ ! -f "$_SENTINEL" ]; then
+    echo "Acquiring download lock..."
+    (
+        flock -x 200
+        if [ ! -f "$_SENTINEL" ]; then
+            echo "Downloading HuggingFace datasets and tokenizer..."
+            python download_text_datasets.py && touch "$_SENTINEL"
+        fi
+    ) 200>"$_LOCKFILE"
+fi
+
 sweep_configs=(
     "sweep_text_weight_decay.yaml"
     "sweep_text_train_fraction.yaml"

@@ -1,0 +1,9 @@
+# Sweep: training data fraction on the analogy task.
+# Mirrors sweep_train_fraction.yaml for modular arithmetic.
+# Lower fractions (0.2–0.3) create a large memorisation gap and make grokking
+# most visible; higher fractions (0.5+) approach fast generalisation.
+# Total: 6 fractions × 3 seeds = 18 jobs.
+base_config: configs/analogy_base.yaml
+sweep:
+  train_fraction: [0.2, 0.25, 0.3, 0.4, 0.5, 0.6]
+  seed: [0, 1, 2]

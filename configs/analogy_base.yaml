@@ -1,0 +1,11 @@
+# Base config for synthetic analogy grokking experiments.
+# Entities: Z_5 × Z_5 grid (25 tokens), 14 400 total quadruples.
+# Sequence length 6 is auto-detected by train.py — no max_seq_len needed.
+base_config: configs/base.yaml
+dataset: analogy
+analogy_rows: 5
+analogy_cols: 5
+train_fraction: 0.3    # lower than modular default to force memorise-then-generalise
+weight_decay: 1.0
+n_steps: 100000
+batch_size: -1         # full-batch

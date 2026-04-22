@@ -1,0 +1,13 @@
+# Sweep over regularization penalties: weight decay × dropout.
+# Both are present in the original Power et al. setup; this sweep isolates
+# their individual and joint contributions to grokking.
+#
+# weight_decay controls the L2 penalty on all parameters via AdamW.
+# dropout is applied after attention and FF sub-layers in each transformer block.
+#
+# Total: 4 weight_decay × 3 dropout × 3 seeds = 36 jobs.
+base_config: configs/base.yaml
+sweep:
+  weight_decay: [0.0, 0.1, 1.0, 5.0]
+  dropout: [0.0, 0.1, 0.3]
+  seed: [0, 1, 2]
