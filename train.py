@@ -34,6 +34,7 @@ from torch.utils.data import DataLoader
 
 from data.modular_arithmetic import get_modular_arithmetic_datasets, get_vocab_size
 from data.text_datasets import list_datasets as list_text_datasets
+from data.csv_dataset import get_csv_datasets
 from data.text_classification import (
     get_trec_datasets,
     get_vocab_size as get_trec_vocab_size,
@@ -57,8 +58,10 @@ def parse_args(argv=None) -> argparse.Namespace:
 
     # Dataset
     p.add_argument('--dataset', type=str, default='modular_arithmetic',
-                   choices=['modular_arithmetic', 'trec'],
+                   choices=['modular_arithmetic', 'trec', 'csv'],
                    help='Dataset to use.')
+    p.add_argument('--csv_path', type=str, default=None,
+                   help='Path to a CSV file when --dataset csv is selected.')
     p.add_argument('--max_seq_len', type=int, default=64,
                    help='Max sequence length for text datasets (TREC etc.).')
     p.add_argument('--prime', type=int, default=97,
@@ -70,7 +73,7 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help='Fraction of all pairs / examples used for training (0 < f < 1).')
     # Text-dataset-specific
     p.add_argument('--hf_dataset', type=str, default=None,
-                   help=f'HuggingFace text dataset key. One of: {list_text_datasets()}')
+                   help='HuggingFace text dataset key. Currently supported: TREC.')
     p.add_argument('--tokenizer_name', type=str, default='bert-base-uncased',
                    help='HuggingFace tokenizer name or local path.')
     p.add_argument('--max_dataset_size', type=int, default=-1,
@@ -161,6 +164,16 @@ def make_exp_name(args) -> str:
             f"_frac{args.train_fraction}"
             f"_seed{args.seed}"
         )
+    elif args.dataset == 'csv':
+        csv_name = 'csv'
+        if args.csv_path:
+            csv_name = f"csv_{os.path.splitext(os.path.basename(args.csv_path))[0]}"
+        return (
+            f"{args.model}_{csv_name}"
+            f"_wd{args.weight_decay}"
+            f"_frac{args.train_fraction}"
+            f"_seed{args.seed}"
+        )
     else:
         return (
             f"{args.model}_{args.dataset}"
@@ -188,6 +201,10 @@ def build_datasets(args):
         output_dim = args.prime
         seq_len = 4
         return train_ds, test_ds, vocab_size, output_dim, seq_len
+    elif args.dataset == 'csv':
+        if not args.csv_path:
+            raise ValueError('--csv_path is required when --dataset csv is selected')
+        return get_csv_datasets(args.csv_path)
     elif args.dataset == 'trec':
         train_ds, test_ds = get_trec_datasets(
             max_seq_len=args.max_seq_len,
