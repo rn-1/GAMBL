@@ -40,6 +40,8 @@ from data.text_classification import (
 )
 from models.mlp import MLP
 from models.transformer import GrokTransformer
+from models.transformer_decoder import GrokTransformerDecoder
+from models.transformer_encoder import GrokTransformerEncoder
 
 
 # ---------------------------------------------------------------------------
@@ -68,7 +70,7 @@ def parse_args(argv=None) -> argparse.Namespace:
 
     # Model
     p.add_argument('--model', type=str, default='transformer',
-                   choices=['transformer', 'mlp'],
+                   choices=['transformer', 'transformer_decoder', 'transformer_encoder', 'mlp'],
                    help='Model architecture.')
     # Transformer-specific
     p.add_argument('--d_model', type=int, default=128)
@@ -192,8 +194,20 @@ def build_datasets(args):
 
 
 def build_model(args, vocab_size: int, output_dim: int, seq_len: int) -> nn.Module:
-    if args.model == 'transformer':
-        return GrokTransformer(
+    if args.model in ('transformer', 'transformer_decoder'):
+        return GrokTransformerDecoder(
+            vocab_size=vocab_size,
+            d_model=args.d_model,
+            n_heads=args.n_heads,
+            n_layers=args.n_layers,
+            d_ff=args.d_ff,
+            output_dim=output_dim,
+            max_seq_len=seq_len,
+            dropout=args.dropout,
+            use_positional_encoding=not args.no_pos_encoding,
+        )
+    elif args.model == 'transformer_encoder':
+        return GrokTransformerEncoder(
             vocab_size=vocab_size,
             d_model=args.d_model,
             n_heads=args.n_heads,
