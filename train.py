@@ -33,6 +33,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from data.modular_arithmetic import get_modular_arithmetic_datasets, get_vocab_size
+from data.text_datasets import list_datasets as list_text_datasets
 from data.text_classification import (
     get_trec_datasets,
     get_vocab_size as get_trec_vocab_size,
