@@ -56,20 +56,22 @@ class TransformerBlock(nn.Module):
             nn.Dropout(dropout),
         )
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor, padding_mask: Tensor = None) -> Tensor:
         """
         Args:
-            x: (batch, seq_len, d_model)
+            x:            (batch, seq_len, d_model)
+            padding_mask: (batch, seq_len) BoolTensor — True = PAD (ignored in attention).
 
         Returns:
             x: (batch, seq_len, d_model)
         """
-        # Self-attention with pre-norm and residual
         normed = self.norm1(x)
-        attn_out, _ = self.attn(normed, normed, normed, need_weights=False)
+        attn_out, _ = self.attn(
+            normed, normed, normed,
+            key_padding_mask=padding_mask,
+            need_weights=False,
+        )
         x = x + attn_out
-
-        # Feed-forward with pre-norm and residual
         x = x + self.ff(self.norm2(x))
         return x
 
@@ -113,8 +115,8 @@ class GrokTransformer(nn.Module):
         pool: str = 'last',
     ):
         super().__init__()
-        if pool not in ('last', 'mean'):
-            raise ValueError(f"pool must be 'last' or 'mean', got '{pool}'")
+        if pool not in ('last', 'mean', 'cls'):
+            raise ValueError(f"pool must be 'last', 'mean', or 'cls', got '{pool}'")
 
         self.pool = pool
         self.token_embedding = nn.Embedding(vocab_size, d_model)
@@ -143,10 +145,13 @@ class GrokTransformer(nn.Module):
         nn.init.normal_(self.head.weight, std=0.02)
         nn.init.zeros_(self.head.bias)
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor, padding_mask: Tensor = None) -> Tensor:
         """
         Args:
-            x: (batch, seq_len) LongTensor of token indices.
+            x:            (batch, seq_len) LongTensor of token indices.
+            padding_mask: (batch, seq_len) BoolTensor — True = PAD token.
+                          Passed to every attention layer and used for masked
+                          mean pooling when pool='mean'.
 
         Returns:
             logits: (batch, output_dim)
@@ -163,13 +168,20 @@ class GrokTransformer(nn.Module):
             h = self.dropout(tok_emb)
 
         for block in self.blocks:
-            h = block(h)
+            h = block(h, padding_mask=padding_mask)
 
         h = self.norm(h)  # (B, T, d_model)
 
         if self.pool == 'last':
-            pooled = h[:, -1, :]   # last position = '=' token representation
-        else:
-            pooled = h.mean(dim=1)
+            pooled = h[:, -1, :]
+        elif self.pool == 'cls':
+            pooled = h[:, 0, :]   # [CLS] token is always at position 0
+        else:  # 'mean'
+            if padding_mask is not None:
+                # Exclude PAD positions from the average
+                valid = (~padding_mask).float().unsqueeze(-1)  # (B, T, 1)
+                pooled = (h * valid).sum(dim=1) / valid.sum(dim=1).clamp(min=1)
+            else:
+                pooled = h.mean(dim=1)
 
         return self.head(pooled)   # (B, output_dim)

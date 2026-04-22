@@ -49,6 +49,7 @@ class MLP(nn.Module):
         output_dim: int = 97,
         activation: str = 'relu',
         dropout: float = 0.0,
+        seq_len: int = 4,
     ):
         super().__init__()
         if activation not in ACTIVATIONS:
@@ -59,7 +60,6 @@ class MLP(nn.Module):
         self.embedding = nn.Embedding(vocab_size, embed_dim)
 
         act_cls = ACTIVATIONS[activation]
-        seq_len = 4  # [a, op, b, eq]
         input_dim = embed_dim * seq_len
 
         layers = []
@@ -74,10 +74,11 @@ class MLP(nn.Module):
         layers.append(nn.Linear(in_dim, output_dim))
         self.net = nn.Sequential(*layers)
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor, padding_mask: Tensor = None) -> Tensor:
         """
         Args:
-            x: (batch, seq_len) LongTensor of token indices.
+            x:            (batch, seq_len) LongTensor of token indices.
+            padding_mask: ignored — MLP embeds each token independently.
 
         Returns:
             logits: (batch, output_dim)
