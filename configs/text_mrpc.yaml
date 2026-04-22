@@ -1,0 +1,13 @@
+# MRPC (GLUE Microsoft Research Paraphrase Corpus)
+# Binary: sentence1 + sentence2 → paraphrase / not_paraphrase
+# HF train split: 3668 examples.
+base_config: configs/base.yaml
+dataset: text
+hf_dataset: mrpc
+tokenizer_name: bert-base-uncased
+max_seq_len: 128
+pool: mean
+n_steps: 50000
+batch_size: -1        # full-batch (3668 examples)
+weight_decay: 1.0
+lr: 0.001

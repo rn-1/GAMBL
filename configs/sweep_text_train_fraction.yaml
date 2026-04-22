@@ -1,0 +1,7 @@
+# Sweep: training data fraction on RTE.
+# Mirrors sweep_train_fraction.yaml but on a text classification task.
+# Total: 5 fractions × 3 seeds = 15 jobs.
+base_config: configs/text_rte.yaml
+sweep:
+  train_fraction: [0.2, 0.3, 0.4, 0.6, 0.8]
+  seed: [0, 1, 2]

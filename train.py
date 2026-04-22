@@ -33,6 +33,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from data.modular_arithmetic import get_modular_arithmetic_datasets, get_vocab_size
+from data.text_datasets import get_text_datasets, list_datasets as list_text_datasets
 from models.mlp import MLP
 from models.transformer import GrokTransformer
 
@@ -49,15 +50,26 @@ def parse_args(argv=None) -> argparse.Namespace:
 
     # Dataset
     p.add_argument('--dataset', type=str, default='modular_arithmetic',
-                   choices=['modular_arithmetic'],
-                   help='Dataset to use.')
+                   choices=['modular_arithmetic', 'text'],
+                   help='Dataset family. Use "text" for HuggingFace text tasks.')
     p.add_argument('--prime', type=int, default=97,
                    help='Prime modulus p for modular arithmetic.')
     p.add_argument('--operation', type=str, default='+',
                    choices=['+', '-', '*', '/'],
                    help='Arithmetic operation.')
     p.add_argument('--train_fraction', type=float, default=0.5,
-                   help='Fraction of all pairs used for training (0 < f < 1).')
+                   help='Fraction of all pairs / examples used for training (0 < f < 1).')
+    # Text-dataset-specific
+    p.add_argument('--hf_dataset', type=str, default=None,
+                   help=f'HuggingFace text dataset key. One of: {list_text_datasets()}')
+    p.add_argument('--tokenizer_name', type=str, default='bert-base-uncased',
+                   help='HuggingFace tokenizer name or local path.')
+    p.add_argument('--max_seq_len', type=int, default=4,
+                   help='Max token sequence length. 4 for modular arithmetic, '
+                        '128 for text datasets.')
+    p.add_argument('--max_dataset_size', type=int, default=-1,
+                   help='Cap total examples before train/test split. '
+                        'Useful for large datasets like ag_news (default: no cap).')
 
     # Model
     p.add_argument('--model', type=str, default='transformer',
@@ -69,7 +81,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument('--n_heads', type=int, default=4)
     p.add_argument('--d_ff', type=int, default=512)
     p.add_argument('--dropout', type=float, default=0.1)
-    p.add_argument('--pool', type=str, default='last', choices=['last', 'mean'])
+    p.add_argument('--pool', type=str, default='last', choices=['last', 'mean', 'cls'])
     p.add_argument('--no_pos_encoding', action='store_true',
                    help='Disable positional encoding in the transformer.')
     # MLP-specific
@@ -135,13 +147,21 @@ def get_device(device_str: str) -> torch.device:
 
 
 def make_exp_name(args) -> str:
-    op_name = {'+': 'plus', '-': 'minus', '*': 'times', '/': 'div'}[args.operation]
-    return (
-        f"{args.model}_mod{args.prime}_{op_name}"
-        f"_wd{args.weight_decay}"
-        f"_frac{args.train_fraction}"
-        f"_seed{args.seed}"
-    )
+    if args.dataset == 'modular_arithmetic':
+        op_name = {'+': 'plus', '-': 'minus', '*': 'times', '/': 'div'}[args.operation]
+        return (
+            f"{args.model}_mod{args.prime}_{op_name}"
+            f"_wd{args.weight_decay}"
+            f"_frac{args.train_fraction}"
+            f"_seed{args.seed}"
+        )
+    else:
+        return (
+            f"{args.model}_text_{args.hf_dataset}"
+            f"_wd{args.weight_decay}"
+            f"_frac{args.train_fraction}"
+            f"_seed{args.seed}"
+        )
 
 
 def compute_accuracy(logits: torch.Tensor, labels: torch.Tensor) -> float:
@@ -161,6 +181,18 @@ def build_datasets(args):
         vocab_size = get_vocab_size(args.prime)
         output_dim = args.prime
         return train_ds, test_ds, vocab_size, output_dim
+    elif args.dataset == 'text':
+        if args.hf_dataset is None:
+            raise ValueError("--hf_dataset is required when --dataset text")
+        train_ds, test_ds, vocab_size, num_classes = get_text_datasets(
+            dataset_name=args.hf_dataset,
+            train_fraction=args.train_fraction,
+            seed=args.seed,
+            tokenizer_name=args.tokenizer_name,
+            max_seq_len=args.max_seq_len,
+            max_dataset_size=args.max_dataset_size,
+        )
+        return train_ds, test_ds, vocab_size, num_classes
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
 
@@ -174,7 +206,7 @@ def build_model(args, vocab_size: int, output_dim: int) -> nn.Module:
             n_layers=args.n_layers,
             d_ff=args.d_ff,
             output_dim=output_dim,
-            max_seq_len=4,
+            max_seq_len=args.max_seq_len,
             dropout=args.dropout,
             use_positional_encoding=not args.no_pos_encoding,
             pool=args.pool,
@@ -188,6 +220,7 @@ def build_model(args, vocab_size: int, output_dim: int) -> nn.Module:
             output_dim=output_dim,
             activation=args.activation,
             dropout=args.dropout,
+            seq_len=args.max_seq_len,
         )
     else:
         raise ValueError(f"Unknown model: {args.model}")
@@ -238,11 +271,16 @@ def train(args):
     batch_size = len(train_ds) if args.batch_size == -1 else args.batch_size
     train_loader = make_infinite_loader(train_ds, batch_size=batch_size)
 
-    # For evaluation, load everything at once
-    test_inputs = test_ds.inputs.to(device)
-    test_labels = test_ds.labels.to(device)
+    # For evaluation, load everything at once.
+    # TextDataset exposes a padding_mask attribute; ModularArithmeticDataset does not.
+    test_inputs  = test_ds.inputs.to(device)
+    test_labels  = test_ds.labels.to(device)
     train_inputs = train_ds.inputs.to(device)
     train_labels = train_ds.labels.to(device)
+    test_mask  = getattr(test_ds,  'padding_mask', None)
+    train_mask = getattr(train_ds, 'padding_mask', None)
+    if test_mask  is not None: test_mask  = test_mask.to(device)
+    if train_mask is not None: train_mask = train_mask.to(device)
 
     # ---- model ----------------------------------------------------------
     model = build_model(args, vocab_size=vocab_size, output_dim=output_dim).to(device)
@@ -270,11 +308,15 @@ def train(args):
 
     for step in range(1, args.n_steps + 1):
         # --- gradient step ---
-        inputs, labels = next(train_loader)
-        inputs, labels = inputs.to(device), labels.to(device)
+        batch = next(train_loader)
+        if len(batch) == 3:
+            inputs, mask, labels = (t.to(device) for t in batch)
+        else:
+            inputs, labels = (t.to(device) for t in batch)
+            mask = None
 
         optimizer.zero_grad()
-        logits = model(inputs)
+        logits = model(inputs, padding_mask=mask)
         loss = criterion(logits, labels)
         loss.backward()
         optimizer.step()
@@ -284,12 +326,12 @@ def train(args):
             model.eval()
             with torch.no_grad():
                 # Training metrics (full dataset for accurate reporting)
-                train_logits = model(train_inputs)
+                train_logits = model(train_inputs, padding_mask=train_mask)
                 train_loss = criterion(train_logits, train_labels).item()
                 train_acc = compute_accuracy(train_logits, train_labels)
 
                 # Test metrics
-                test_logits = model(test_inputs)
+                test_logits = model(test_inputs, padding_mask=test_mask)
                 test_loss = criterion(test_logits, test_labels).item()
                 test_acc = compute_accuracy(test_logits, test_labels)
 

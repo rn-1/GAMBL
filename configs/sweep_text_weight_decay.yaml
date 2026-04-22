@@ -1,0 +1,7 @@
+# Sweep: weight decay on RTE (smallest GLUE task, best for grokking onset).
+# Mirrors sweep_weight_decay.yaml but on a text classification task.
+# Total: 4 wd values × 3 seeds = 12 jobs.
+base_config: configs/text_rte.yaml
+sweep:
+  weight_decay: [0.0, 0.1, 1.0, 5.0]
+  seed: [0, 1, 2]

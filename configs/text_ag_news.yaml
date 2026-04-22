@@ -1,0 +1,15 @@
+# AG News (Topic Classification)
+# 4-class: news headline+description → World / Sports / Business / Sci&Tech
+# HF train split: 120000 examples — capped at 10000 via max_dataset_size.
+# With train_fraction=0.5: 5000 train / 5000 test.
+base_config: configs/base.yaml
+dataset: text
+hf_dataset: ag_news
+tokenizer_name: bert-base-uncased
+max_seq_len: 128
+max_dataset_size: 10000
+pool: mean
+n_steps: 50000
+batch_size: 256
+weight_decay: 1.0
+lr: 0.001
