@@ -66,7 +66,18 @@ def parse_args(argv=None) -> argparse.Namespace:
                    choices=['+', '-', '*', '/'],
                    help='Arithmetic operation.')
     p.add_argument('--train_fraction', type=float, default=0.5,
-                   help='Fraction of all pairs used for training (0 < f < 1).')
+                   help='Fraction of all pairs / examples used for training (0 < f < 1).')
+    # Text-dataset-specific
+    p.add_argument('--hf_dataset', type=str, default=None,
+                   help=f'HuggingFace text dataset key. One of: {list_text_datasets()}')
+    p.add_argument('--tokenizer_name', type=str, default='bert-base-uncased',
+                   help='HuggingFace tokenizer name or local path.')
+    p.add_argument('--max_seq_len', type=int, default=4,
+                   help='Max token sequence length. 4 for modular arithmetic, '
+                        '128 for text datasets.')
+    p.add_argument('--max_dataset_size', type=int, default=-1,
+                   help='Cap total examples before train/test split. '
+                        'Useful for large datasets like ag_news (default: no cap).')
 
     # Model
     p.add_argument('--model', type=str, default='transformer',
@@ -78,7 +89,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument('--n_heads', type=int, default=4)
     p.add_argument('--d_ff', type=int, default=512)
     p.add_argument('--dropout', type=float, default=0.1)
-    p.add_argument('--pool', type=str, default='last', choices=['last', 'mean'])
+    p.add_argument('--pool', type=str, default='last', choices=['last', 'mean', 'cls'])
     p.add_argument('--no_pos_encoding', action='store_true',
                    help='Disable positional encoding in the transformer.')
     # MLP-specific
@@ -279,11 +290,16 @@ def train(args):
     batch_size = len(train_ds) if args.batch_size == -1 else args.batch_size
     train_loader = make_infinite_loader(train_ds, batch_size=batch_size)
 
-    # For evaluation, load everything at once
-    test_inputs = test_ds.inputs.to(device)
-    test_labels = test_ds.labels.to(device)
+    # For evaluation, load everything at once.
+    # TextDataset exposes a padding_mask attribute; ModularArithmeticDataset does not.
+    test_inputs  = test_ds.inputs.to(device)
+    test_labels  = test_ds.labels.to(device)
     train_inputs = train_ds.inputs.to(device)
     train_labels = train_ds.labels.to(device)
+    test_mask  = getattr(test_ds,  'padding_mask', None)
+    train_mask = getattr(train_ds, 'padding_mask', None)
+    if test_mask  is not None: test_mask  = test_mask.to(device)
+    if train_mask is not None: train_mask = train_mask.to(device)
 
     # ---- model ----------------------------------------------------------
     model = build_model(args, vocab_size=vocab_size, output_dim=output_dim, seq_len=seq_len).to(device)
@@ -311,11 +327,15 @@ def train(args):
 
     for step in range(1, args.n_steps + 1):
         # --- gradient step ---
-        inputs, labels = next(train_loader)
-        inputs, labels = inputs.to(device), labels.to(device)
+        batch = next(train_loader)
+        if len(batch) == 3:
+            inputs, mask, labels = (t.to(device) for t in batch)
+        else:
+            inputs, labels = (t.to(device) for t in batch)
+            mask = None
 
         optimizer.zero_grad()
-        logits = model(inputs)
+        logits = model(inputs, padding_mask=mask)
         loss = criterion(logits, labels)
         loss.backward()
         optimizer.step()
@@ -325,12 +345,12 @@ def train(args):
             model.eval()
             with torch.no_grad():
                 # Training metrics (full dataset for accurate reporting)
-                train_logits = model(train_inputs)
+                train_logits = model(train_inputs, padding_mask=train_mask)
                 train_loss = criterion(train_logits, train_labels).item()
                 train_acc = compute_accuracy(train_logits, train_labels)
 
                 # Test metrics
-                test_logits = model(test_inputs)
+                test_logits = model(test_inputs, padding_mask=test_mask)
                 test_loss = criterion(test_logits, test_labels).item()
                 test_acc = compute_accuracy(test_logits, test_labels)
 

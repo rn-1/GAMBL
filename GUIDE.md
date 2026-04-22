@@ -269,3 +269,4 @@ optimizer.load_state_dict(ckpt['optimizer_state_dict'])
 - Nanda et al. (2023). *Progress measures for grokking via mechanistic interpretability.* https://arxiv.org/abs/2301.05217 (useful for the interpretability extension)
 - Liu et al. (2023). https://arxiv.org/abs/2306.13253
 - https://arxiv.org/html/2502.01774v1
+- https://arxiv.org/abs/2301.05217

@@ -1,0 +1,11 @@
+# Sweep: compare grokking behaviour across text tasks.
+# Fixed weight_decay=1.0 and train_fraction=0.5 (same as the modular baseline).
+# Total: 4 datasets × 3 seeds = 12 jobs.
+# Note: sst2 and ag_news use their own max_dataset_size / batch_size settings
+#       defined in their individual configs, but those per-dataset defaults are
+#       not carried through a sweep that overrides hf_dataset.  Add the shared
+#       settings here explicitly so all datasets run under the same conditions.
+base_config: configs/text_rte.yaml   # supplies all non-swept defaults
+sweep:
+  hf_dataset: [rte, mrpc, cola, boolq]
+  seed: [0, 1, 2]

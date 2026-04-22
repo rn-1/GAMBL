@@ -74,10 +74,11 @@ class MLP(nn.Module):
         layers.append(nn.Linear(in_dim, output_dim))
         self.net = nn.Sequential(*layers)
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor, padding_mask: Tensor = None) -> Tensor:
         """
         Args:
-            x: (batch, seq_len) LongTensor of token indices.
+            x:            (batch, seq_len) LongTensor of token indices.
+            padding_mask: ignored — MLP embeds each token independently.
 
         Returns:
             logits: (batch, output_dim)

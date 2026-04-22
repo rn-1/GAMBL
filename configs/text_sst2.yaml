@@ -1,0 +1,14 @@
+# SST-2 (GLUE Stanford Sentiment Treebank)
+# Binary: movie review sentence → positive / negative
+# HF train split: 67349 examples — capped at 10000 via max_dataset_size.
+base_config: configs/base.yaml
+dataset: text
+hf_dataset: sst2
+tokenizer_name: bert-base-uncased
+max_seq_len: 64       # SST-2 sentences are short
+max_dataset_size: 10000
+pool: mean
+n_steps: 50000
+batch_size: 256       # mini-batch; 10k full-batch is feasible but slower
+weight_decay: 1.0
+lr: 0.001

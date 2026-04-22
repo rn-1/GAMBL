@@ -92,16 +92,25 @@ def expand_sweep(sweep_grid: dict) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def make_exp_name(params: dict) -> str:
+    model = params.get('model', 'transformer')
+    wd    = params.get('weight_decay', 1.0)
+    frac  = params.get('train_fraction', 0.5)
+    seed  = params.get('seed', 42)
+
+    if params.get('dataset', 'modular_arithmetic') == 'text':
+        hf_dataset = params.get('hf_dataset', 'unknown')
+        return f"{model}_text_{hf_dataset}_wd{wd}_frac{frac}_seed{seed}"
+
     op_name = {'+': 'plus', '-': 'minus', '*': 'times', '/': 'div'}.get(
         params.get('operation', '+'), params.get('operation', '+')
     )
     return (
-        f"{params.get('model', 'transformer')}"
+        f"{model}"
         f"_mod{params.get('prime', 97)}"
         f"_{op_name}"
-        f"_wd{params.get('weight_decay', 1.0)}"
-        f"_frac{params.get('train_fraction', 0.5)}"
-        f"_seed{params.get('seed', 42)}"
+        f"_wd{wd}"
+        f"_frac{frac}"
+        f"_seed{seed}"
     )
 
 
