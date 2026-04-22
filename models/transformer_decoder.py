@@ -143,7 +143,7 @@ class GrokTransformerDecoder(nn.Module):
         nn.init.normal_(self.head.weight, std=0.02)
         nn.init.zeros_(self.head.bias)
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor, padding_mask: Tensor = None) -> Tensor:
         """
         Args:
             x: (batch, seq_len) LongTensor of token indices.
