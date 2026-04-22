@@ -73,9 +73,6 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help=f'HuggingFace text dataset key. One of: {list_text_datasets()}')
     p.add_argument('--tokenizer_name', type=str, default='bert-base-uncased',
                    help='HuggingFace tokenizer name or local path.')
-    p.add_argument('--max_seq_len', type=int, default=4,
-                   help='Max token sequence length. 4 for modular arithmetic, '
-                        '128 for text datasets.')
     p.add_argument('--max_dataset_size', type=int, default=-1,
                    help='Cap total examples before train/test split. '
                         'Useful for large datasets like ag_news (default: no cap).')
