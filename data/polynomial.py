@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Generate a polynomial text dataset with train.py-compatible CSV output.
+"""Generate a numeric polynomial dataset with train.py-compatible CSV output.
 
 Each example is a string-to-string mapping such as:
 
     Input:  f(x)=2x^2+3x+1; x=4
     Output: 45
 
-The generator randomizes:
-- function/variable names
-- coefficient encodings (decimal, signed, zero-padded, words, roman numerals)
-- formatting details (spaces, separators, equation style)
+The generator uses a strict numeric format:
+- decimal coefficients only
+- fixed variable name x
+- no extra spaces or decorative text
 
 By default it writes a single CSV with columns compatible with
 `data/csv_dataset.py` and `train.py --dataset csv`:
@@ -37,7 +37,6 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import math
 import random
 import string
 from dataclasses import dataclass
@@ -111,17 +110,9 @@ def number_to_words(n: int) -> str:
 
 
 def encode_int(n: int, mode: str) -> str:
-    if mode == "decimal":
-        return str(n)
-    if mode == "signed":
-        return f"{n:+d}"
-    if mode == "zero_padded":
-        return f"{n:+04d}" if n < 0 else f"{n:03d}"
-    if mode == "words":
-        return number_to_words(n)
-    if mode == "roman":
-        return roman_numeral(n)
-    raise ValueError(f"Unknown coefficient encoding mode: {mode}")
+    if mode != "decimal":
+        raise ValueError(f"Only decimal mode is supported, got: {mode}")
+    return str(n)
 
 
 def random_identifier(rng: random.Random, min_len: int = 1, max_len: int = 3) -> str:
@@ -187,7 +178,7 @@ def format_term(coeff: int, power: int, coeff_mode: str, first: bool) -> str:
 
     if first:
         return core if coeff >= 0 else f"-{core}"
-    return f"+ {core}" if coeff >= 0 else f"- {core}"
+    return f"+{core}" if coeff >= 0 else f"-{core}"
 
 
 def format_polynomial(
@@ -206,16 +197,8 @@ def format_polynomial(
     if not terms:
         terms = ["0"]
 
-    poly_body = " ".join(terms)
-
-    style = rng.choice(["plain", "named", "brace", "paren"])
-    if style == "plain":
-        return f"{func_name}({var_name})={poly_body}"
-    if style == "named":
-        return f"{func_name}({var_name}) = {poly_body}"
-    if style == "brace":
-        return f"{func_name}({var_name}) := {poly_body}"
-    return f"{func_name}({var_name}) -> {poly_body}"
+    # Numeric expression only, no function wrapper or extra separators.
+    return "".join(terms)
 
 
 def format_query(
@@ -226,11 +209,7 @@ def format_query(
     x_mode: str,
 ) -> str:
     x_enc = encode_int(x_val, x_mode)
-    separators = [";", " |", " ||", " ;"]
-    sep = rng.choice(separators)
-    if rng.random() < 0.5:
-        return f"{poly_text}{sep} {x_name}={x_enc}"
-    return f"{poly_text}{sep} {x_name} = {x_enc}"
+    return f"{poly_text};{x_name}={x_enc}"
 
 
 def make_example(
@@ -248,18 +227,17 @@ def make_example(
     # The range is still enough to produce varied answers.
     x_val = max(min(x_val, 9), -9)
 
-    func_name = random_func_name(rng)
-    var_name = random_var_name(rng)
+    func_name = "f"
+    var_name = "x"
 
-    coeff_mode = rng.choice(list(coeff_encodings))
-    x_mode = rng.choice(list(x_encodings))
+    coeff_mode = "decimal"
+    x_mode = "decimal"
 
     poly_text = format_polynomial(coeffs, coeff_mode, rng, var_name=var_name, func_name=func_name)
     input_text = format_query(poly_text, var_name, x_val, rng, x_mode=x_mode)
     y = evaluate_polynomial(coeffs, x_val)
 
-    # Output formatting can also be varied slightly.
-    output_text = str(y) if rng.random() < 0.95 else f"y={y}"
+    output_text = str(y)
 
     metadata = {
         "degree": degree,
@@ -269,6 +247,8 @@ def make_example(
         "var_name": var_name,
         "coeff_mode": coeff_mode,
         "x_mode": x_mode,
+        "poly_text": poly_text,
+        "x_assign": str(x_val),
     }
     return Example(input_text=input_text, output_text=output_text, metadata=metadata)
 
@@ -314,16 +294,14 @@ def write_trainpy_csv(path: Path, examples: Sequence[Example]) -> None:
         writer = csv.writer(f)
         writer.writerow(["row_id", "category", "word_one", "word_two", "word_three", "word_four"])
         for i, ex in enumerate(examples):
-            # Build a structured prompt split across 3 fields.
-            # word_four remains the target text to be generated.
             poly_text = ex.metadata.get("poly_text", ex.input_text)
-            x_assign = ex.metadata.get("x_assign", "")
+            x_assign = ex.metadata.get("x_assign", "0")
             writer.writerow([
                 i,
                 "polynomial-eval",
                 str(poly_text),
                 str(x_assign),
-                "predict value",
+                "0",
                 ex.output_text,
             ])
 
@@ -352,8 +330,8 @@ def main() -> None:
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    coeff_encodings = ["decimal", "signed", "zero_padded", "words", "roman"]
-    x_encodings = ["decimal", "signed", "zero_padded"]
+    coeff_encodings = ["decimal"]
+    x_encodings = ["decimal"]
 
     examples = [
         make_example(
@@ -370,26 +348,7 @@ def main() -> None:
     rng.shuffle(examples)
     train, val, test = split_examples(examples, args.train_frac, args.val_frac)
 
-    # Build metadata fields used by CSV writer.
-    # We derive poly/x assignment by splitting around separators from input_text.
-    all_examples = []
-    for ex in examples:
-        input_text = ex.input_text
-        separator = None
-        for s in (" || ", " | ", "; ", " ; ", "|"):
-            if s in input_text:
-                separator = s
-                break
-        if separator is None and ";" in input_text:
-            separator = ";"
-        if separator is not None:
-            left, right = input_text.split(separator, 1)
-        else:
-            left, right = input_text, ""
-        md = dict(ex.metadata)
-        md["poly_text"] = left.strip()
-        md["x_assign"] = right.strip()
-        all_examples.append(Example(input_text=ex.input_text, output_text=ex.output_text, metadata=md))
+    all_examples = examples
 
     # Default output: one train.py-compatible CSV (train.py does its own split).
     write_trainpy_csv(outdir / args.csv_name, all_examples)
