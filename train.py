@@ -59,7 +59,7 @@ def parse_args(argv=None) -> argparse.Namespace:
 
     # Dataset
     p.add_argument('--dataset', type=str, default='modular_arithmetic',
-                   choices=['modular_arithmetic', 'trec', 'text', 'scan', 'csv'],
+                   choices=['modular_arithmetic', 'trec', 'text', 'scan', 'csv', 'ruletaker'],
                    help='Dataset to use.')
     p.add_argument('--csv_path', type=str, default='data/questions-words.csv',
                    help='Path to CSV file for --dataset csv.')
@@ -208,6 +208,16 @@ def build_datasets(args):
     elif args.dataset == 'scan':
         train_ds, test_ds, vocab_size, num_classes = get_scan_datasets(
             split=args.scan_split,
+            train_fraction=args.train_fraction,
+            seed=args.seed,
+            max_seq_len=args.max_seq_len,
+        )
+        seq_len = args.max_seq_len
+        return train_ds, test_ds, vocab_size, num_classes, seq_len
+    elif args.dataset == 'ruletaker':
+        from data.ruletaker_dataset import get_ruletaker_datasets
+        train_ds, test_ds, vocab_size, num_classes = get_ruletaker_datasets(
+            max_examples=5000,
             train_fraction=args.train_fraction,
             seed=args.seed,
             max_seq_len=args.max_seq_len,
