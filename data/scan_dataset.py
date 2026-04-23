@@ -1,41 +1,20 @@
 """
-SCAN dataset loader for grokking experiments.
+SCAN dataset generator for grokking experiments.
 
-SCAN (Simplified version of the CommAI Navigation tasks) maps short
-compositional commands to action sequences.
+Generates SCAN directly from the grammar — no HuggingFace dependency.
 
-Example:
-    input:  "jump twice and walk"
-    output: "JUMP JUMP WALK"
+SCAN maps short compositional commands to action sequences:
+  "jump twice and walk" → "JUMP JUMP WALK"
 
 Why SCAN is ideal for grokking:
   - Compositional rule-based structure (like modular arithmetic)
   - No surface shortcuts — model must discover composition rules
-  - Finite discrete output space
-  - Small vocabulary (~20 input words, 6 output tokens)
+  - Finite discrete output space (~200-300 unique action sequences)
   - Sharp generalization transitions known to occur
-
-We treat this as SEQUENCE CLASSIFICATION by hashing each unique
-action sequence to an integer label. This keeps the setup identical
-to modular arithmetic (CrossEntropyLoss, same train.py, same metrics).
-
-Splits available:
-  simple        ~16k pairs, random split
-  addprim_jump  compositional split: "jump" held out from combinations
-  addprim_turn_left  compositional split: "turn left" held out
-
-For grokking we use 'simple' with train_fraction=0.5 to mirror
-the modular arithmetic setup.
-
-Tokenization: word-level on the input command.
-  - vocab built from training data
-  - unknown words map to <UNK>
-  - sequences padded/truncated to max_seq_len
-
-Requirements: pip install datasets
 """
 
 from __future__ import annotations
+from itertools import product
 
 import numpy as np
 import torch
@@ -43,20 +22,101 @@ from torch import Tensor
 from torch.utils.data import Dataset
 
 
-PAD_ID  = 0
-UNK_ID  = 1
-VOCAB_OFFSET = 2  # real tokens start at 2
+PAD_ID       = 0
+UNK_ID       = 1
+VOCAB_OFFSET = 2
 
+
+# ---------------------------------------------------------------------------
+# SCAN grammar interpreter
+# ---------------------------------------------------------------------------
+
+def _interpret_primitive(prim: str) -> list[str]:
+    mapping = {
+        'walk':              ['WALK'],
+        'run':               ['RUN'],
+        'jump':              ['JUMP'],
+        'look':              ['LOOK'],
+        'turn left':         ['LTURN'],
+        'turn right':        ['RTURN'],
+        'turn around left':  ['LTURN', 'LTURN', 'LTURN', 'LTURN'],
+        'turn around right': ['RTURN', 'RTURN', 'RTURN', 'RTURN'],
+    }
+    return mapping[prim]
+
+
+def _interpret_single(cmd: str) -> list[str]:
+    for prim in [
+        'turn around left', 'turn around right',
+        'turn left', 'turn right',
+        'walk', 'run', 'jump', 'look',
+    ]:
+        if cmd.startswith(prim):
+            rest = cmd[len(prim):].strip()
+            actions = _interpret_primitive(prim)
+            if rest == 'twice':
+                return actions * 2
+            elif rest == 'thrice':
+                return actions * 3
+            elif rest == '':
+                return actions
+    raise ValueError(f"Cannot interpret: {cmd!r}")
+
+
+def _interpret(cmd: str) -> list[str]:
+    if ' after ' in cmd:
+        parts = cmd.split(' after ', 1)
+        return _interpret(parts[1].strip()) + _interpret(parts[0].strip())
+    if ' and ' in cmd:
+        parts = cmd.split(' and ', 1)
+        return _interpret(parts[0].strip()) + _interpret(parts[1].strip())
+    return _interpret_single(cmd)
+
+
+def generate_scan_pairs() -> list[tuple[str, str]]:
+    primitives = [
+        'walk', 'run', 'jump', 'look',
+        'turn left', 'turn right',
+        'turn around left', 'turn around right',
+    ]
+    adverbs   = ['', 'twice', 'thrice']
+    conjuncts = ['and', 'after']
+
+    singles = []
+    for prim in primitives:
+        for adv in adverbs:
+            cmd = f"{prim} {adv}".strip()
+            singles.append(cmd)
+
+    pairs = []
+    seen  = set()
+
+    for cmd in singles:
+        key = (cmd, ' '.join(_interpret(cmd)))
+        if key not in seen:
+            seen.add(key)
+            pairs.append(key)
+
+    for s1, s2, conj in product(singles, singles, conjuncts):
+        cmd = f"{s1} {conj} {s2}"
+        try:
+            actions = _interpret(cmd)
+            key = (cmd, ' '.join(actions))
+            if key not in seen:
+                seen.add(key)
+                pairs.append(key)
+        except ValueError:
+            pass
+
+    return pairs
+
+
+# ---------------------------------------------------------------------------
+# Dataset class
+# ---------------------------------------------------------------------------
 
 class SCANDataset(Dataset):
-    """
-    SCAN dataset returning (input_ids, label) pairs.
-    Mirrors ModularArithmeticDataset API — no padding mask needed
-    since we fix seq_len and pad deterministically.
-    """
-
     def __init__(self, inputs: Tensor, labels: Tensor):
-        assert inputs.shape[0] == labels.shape[0]
         self.inputs = inputs
         self.labels = labels
 
@@ -67,6 +127,10 @@ class SCANDataset(Dataset):
         return self.inputs[idx], self.labels[idx]
 
 
+# ---------------------------------------------------------------------------
+# Main loader
+# ---------------------------------------------------------------------------
+
 def get_scan_datasets(
     split:          str   = 'simple',
     train_fraction: float = 0.5,
@@ -74,40 +138,19 @@ def get_scan_datasets(
     max_seq_len:    int   = 16,
 ) -> tuple[SCANDataset, SCANDataset, int, int]:
     """
-    Load SCAN, tokenize word-level, and return (train_ds, test_ds, vocab_size, num_classes).
-
-    Args:
-        split:          SCAN split — 'simple', 'addprim_jump', 'addprim_turn_left'
-        train_fraction: Fraction of examples for training.
-        seed:           RNG seed.
-        max_seq_len:    Max input command length in words (padded/truncated).
-                        SCAN commands are short — 16 is sufficient for 'simple'.
-
-    Returns:
-        (train_ds, test_ds, vocab_size, num_classes)
+    Generate SCAN and return (train_ds, test_ds, vocab_size, num_classes).
+    No HuggingFace required — generated from grammar directly.
     """
-    from datasets import load_dataset
+    pairs    = generate_scan_pairs()
+    commands = [p[0] for p in pairs]
+    actions  = [p[1] for p in pairs]
 
-    # Load SCAN — use the HuggingFace mirror
-    raw = load_dataset("scan", split, split="train")
-
-    commands = [ex['commands'] for ex in raw]
-    actions  = [ex['actions']  for ex in raw]
-
-    n = len(commands)
-
-    # ------------------------------------------------------------------
-    # 1. Build action label mapping (action sequence → integer)
-    # ------------------------------------------------------------------
     unique_actions = sorted(set(actions))
     action_to_id   = {a: i for i, a in enumerate(unique_actions)}
     labels         = [action_to_id[a] for a in actions]
     num_classes    = len(unique_actions)
 
-    # ------------------------------------------------------------------
-    # 2. Build word vocabulary from commands
-    # ------------------------------------------------------------------
-    all_words = set()
+    all_words  = set()
     for cmd in commands:
         all_words.update(cmd.split())
     word_to_id = {w: i + VOCAB_OFFSET for i, w in enumerate(sorted(all_words))}
@@ -118,31 +161,23 @@ def get_scan_datasets(
         tokens += [PAD_ID] * (max_seq_len - len(tokens))
         return tokens
 
-    # ------------------------------------------------------------------
-    # 3. Tokenize all commands
-    # ------------------------------------------------------------------
     input_ids = torch.tensor([tokenize(c) for c in commands], dtype=torch.long)
     labels_t  = torch.tensor(labels, dtype=torch.long)
 
-    # ------------------------------------------------------------------
-    # 4. Shuffle and split
-    # ------------------------------------------------------------------
     rng     = np.random.default_rng(seed)
+    n       = len(commands)
     perm    = rng.permutation(n)
     n_train = int(n * train_fraction)
 
-    train_idx = perm[:n_train]
-    test_idx  = perm[n_train:]
+    train_ds = SCANDataset(input_ids[perm[:n_train]], labels_t[perm[:n_train]])
+    test_ds  = SCANDataset(input_ids[perm[n_train:]], labels_t[perm[n_train:]])
 
-    train_ds = SCANDataset(input_ids[train_idx], labels_t[train_idx])
-    test_ds  = SCANDataset(input_ids[test_idx],  labels_t[test_idx])
-
+    print(f"SCAN: {n} pairs, {num_classes} classes, vocab={vocab_size}")
     return train_ds, test_ds, vocab_size, num_classes
 
 
 if __name__ == '__main__':
-    train_ds, test_ds, vocab_size, num_classes = get_scan_datasets()
-    print(f"Train: {len(train_ds)}, Test: {len(test_ds)}")
-    print(f"Vocab size: {vocab_size}, Num classes: {num_classes}")
-    x, y = train_ds[0]
-    print(f"Sample input: {x}, label: {y.item()}")
+    tr, te, v, c = get_scan_datasets()
+    print(f"Train={len(tr)}, Test={len(te)}, Vocab={v}, Classes={c}")
+    x, y = tr[0]
+    print(f"Input: {x}, Label: {y.item()}")
