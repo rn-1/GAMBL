@@ -65,6 +65,10 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help='Path to CSV file for --dataset csv.')
     p.add_argument('--ruletaker_max_examples', type=int, default=15000,
                    help='Max examples to load from RuleTaker (--dataset ruletaker).')
+    p.add_argument('--ruletaker_depth', type=str, default='depth-1',
+                   help='RuleTaker reasoning depth filter. Set to "none" for all depths.')
+    p.add_argument('--ruletaker_max_context_words', type=int, default=None,
+                   help='Filter RuleTaker to contexts with at most this many words.')
     p.add_argument('--scan_split', type=str, default='simple',
                    choices=['simple', 'addprim_jump', 'addprim_turn_left'],
                    help='SCAN split to use.')
@@ -223,6 +227,8 @@ def build_datasets(args):
             train_fraction=args.train_fraction,
             seed=args.seed,
             max_seq_len=args.max_seq_len,
+            depth=None if args.ruletaker_depth == 'none' else args.ruletaker_depth,
+            max_context_words=args.ruletaker_max_context_words,
         )
         seq_len = args.max_seq_len
         return train_ds, test_ds, vocab_size, num_classes, seq_len
