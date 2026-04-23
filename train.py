@@ -39,6 +39,7 @@ from data.text_classification import (
     get_vocab_size as get_trec_vocab_size,
     get_num_classes as get_trec_num_classes,
 )
+from data.csv_dataset import get_csv_datasets
 from models.mlp import MLP
 from models.transformer import GrokTransformer
 from models.transformer_decoder import GrokTransformerDecoder
@@ -57,8 +58,10 @@ def parse_args(argv=None) -> argparse.Namespace:
 
     # Dataset
     p.add_argument('--dataset', type=str, default='modular_arithmetic',
-                   choices=['modular_arithmetic', 'trec'],
+                   choices=['modular_arithmetic', 'trec', 'csv'],
                    help='Dataset to use.')
+    p.add_argument('--csv_path', type=str, default='data/questions-words.csv',
+                   help='Path to analogy CSV when --dataset csv.')
     p.add_argument('--max_seq_len', type=int, default=64,
                    help='Max sequence length for text datasets (TREC etc.).')
     p.add_argument('--prime', type=int, default=97,
@@ -161,6 +164,14 @@ def make_exp_name(args) -> str:
             f"_frac{args.train_fraction}"
             f"_seed{args.seed}"
         )
+    elif args.dataset == 'csv':
+        csv_stem = os.path.splitext(os.path.basename(args.csv_path))[0]
+        return (
+            f"{args.model}_csv_{csv_stem}"
+            f"_wd{args.weight_decay}"
+            f"_frac{args.train_fraction}"
+            f"_seed{args.seed}"
+        )
     else:
         return (
             f"{args.model}_{args.dataset}"
@@ -197,6 +208,13 @@ def build_datasets(args):
         vocab_size = get_trec_vocab_size()
         output_dim = get_trec_num_classes()
         seq_len = args.max_seq_len
+        return train_ds, test_ds, vocab_size, output_dim, seq_len
+    elif args.dataset == 'csv':
+        train_ds, test_ds, vocab_size, output_dim, seq_len = get_csv_datasets(
+            csv_path=args.csv_path,
+            train_fraction=args.train_fraction,
+            seed=args.seed,
+        )
         return train_ds, test_ds, vocab_size, output_dim, seq_len
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
