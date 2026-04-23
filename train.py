@@ -63,6 +63,8 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help='Dataset to use.')
     p.add_argument('--csv_path', type=str, default='data/questions-words.csv',
                    help='Path to CSV file for --dataset csv.')
+    p.add_argument('--ruletaker_max_examples', type=int, default=15000,
+                   help='Max examples to load from RuleTaker (--dataset ruletaker).')
     p.add_argument('--scan_split', type=str, default='simple',
                    choices=['simple', 'addprim_jump', 'addprim_turn_left'],
                    help='SCAN split to use.')
@@ -217,7 +219,7 @@ def build_datasets(args):
     elif args.dataset == 'ruletaker':
         from data.ruletaker_dataset import get_ruletaker_datasets
         train_ds, test_ds, vocab_size, num_classes = get_ruletaker_datasets(
-            max_examples=5000,
+            max_examples=args.ruletaker_max_examples,
             train_fraction=args.train_fraction,
             seed=args.seed,
             max_seq_len=args.max_seq_len,
