@@ -44,6 +44,7 @@ from models.mlp import MLP
 from models.transformer import GrokTransformer
 from models.transformer_decoder import GrokTransformerDecoder
 from models.transformer_encoder import GrokTransformerEncoder
+from models.transformer_lm import GrokTransformerLM
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +83,7 @@ def parse_args(argv=None) -> argparse.Namespace:
 
     # Model
     p.add_argument('--model', type=str, default='transformer',
-                   choices=['transformer', 'transformer_decoder', 'transformer_encoder', 'mlp'],
+                   choices=['transformer', 'transformer_decoder', 'transformer_encoder', 'transformer_lm', 'mlp'],
                    help='Model architecture.')
     # Transformer-specific
     p.add_argument('--d_model', type=int, default=128)
@@ -183,7 +184,19 @@ def make_exp_name(args) -> str:
 
 def compute_accuracy(logits: torch.Tensor, labels: torch.Tensor) -> float:
     preds = logits.argmax(dim=-1)
+    if labels.dim() == 2:
+        # Sequence task with ignore_index masking (e.g. prompt tokens, padding).
+        valid = labels != -100
+        if valid.any():
+            return (preds[valid] == labels[valid]).float().mean().item()
+        return 0.0
     return (preds == labels).float().mean().item()
+
+
+def compute_loss(criterion: nn.Module, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+    if labels.dim() == 2 and logits.dim() == 3:
+        return criterion(logits.reshape(-1, logits.size(-1)), labels.reshape(-1))
+    return criterion(logits, labels)
 
 
 def build_datasets(args):
@@ -245,6 +258,17 @@ def build_model(args, vocab_size: int, output_dim: int, seq_len: int) -> nn.Modu
             dropout=args.dropout,
             use_positional_encoding=not args.no_pos_encoding,
             pool=args.pool,
+        )
+    elif args.model == 'transformer_lm':
+        return GrokTransformerLM(
+            vocab_size=vocab_size,
+            d_model=args.d_model,
+            n_heads=args.n_heads,
+            n_layers=args.n_layers,
+            d_ff=args.d_ff,
+            max_seq_len=seq_len,
+            dropout=args.dropout,
+            use_positional_encoding=not args.no_pos_encoding,
         )
     elif args.model == 'mlp':
         return MLP(
@@ -329,7 +353,7 @@ def train(args):
         betas=tuple(args.betas),
         weight_decay=args.weight_decay,
     )
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(ignore_index=-100)
 
     # ---- logging --------------------------------------------------------
     csv_file = open(metrics_path, 'w', newline='')
@@ -352,7 +376,7 @@ def train(args):
 
         optimizer.zero_grad()
         logits = model(inputs, padding_mask=mask)
-        loss = criterion(logits, labels)
+        loss = compute_loss(criterion, logits, labels)
         loss.backward()
         optimizer.step()
 
@@ -362,12 +386,12 @@ def train(args):
             with torch.no_grad():
                 # Training metrics (full dataset for accurate reporting)
                 train_logits = model(train_inputs, padding_mask=train_mask)
-                train_loss = criterion(train_logits, train_labels).item()
+                train_loss = compute_loss(criterion, train_logits, train_labels).item()
                 train_acc = compute_accuracy(train_logits, train_labels)
 
                 # Test metrics
                 test_logits = model(test_inputs, padding_mask=test_mask)
-                test_loss = criterion(test_logits, test_labels).item()
+                test_loss = compute_loss(criterion, test_logits, test_labels).item()
                 test_acc = compute_accuracy(test_logits, test_labels)
 
             writer.writerow([step, train_loss, train_acc, test_loss, test_acc])
