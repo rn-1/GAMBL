@@ -40,6 +40,7 @@ from data.text_classification import (
     get_num_classes as get_trec_num_classes,
 )
 from data.scan_dataset import get_scan_datasets
+from data.csv_dataset import get_csv_datasets
 from models.mlp import MLP
 from models.transformer import GrokTransformer
 from models.transformer_decoder import GrokTransformerDecoder
@@ -58,8 +59,10 @@ def parse_args(argv=None) -> argparse.Namespace:
 
     # Dataset
     p.add_argument('--dataset', type=str, default='modular_arithmetic',
-                   choices=['modular_arithmetic', 'trec', 'text', 'scan'],
+                   choices=['modular_arithmetic', 'trec', 'text', 'scan', 'csv'],
                    help='Dataset to use.')
+    p.add_argument('--csv_path', type=str, default='data/questions-words.csv',
+                   help='Path to CSV file for --dataset csv.')
     p.add_argument('--scan_split', type=str, default='simple',
                    choices=['simple', 'addprim_jump', 'addprim_turn_left'],
                    help='SCAN split to use.')
@@ -211,6 +214,9 @@ def build_datasets(args):
         )
         seq_len = args.max_seq_len
         return train_ds, test_ds, vocab_size, num_classes, seq_len
+    elif args.dataset == 'csv':
+        train_ds, test_ds, vocab_size, output_dim, seq_len = get_csv_datasets(args.csv_path)
+        return train_ds, test_ds, vocab_size, output_dim, seq_len
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
 
