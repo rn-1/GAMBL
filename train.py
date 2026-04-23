@@ -40,6 +40,7 @@ from data.text_classification import (
     get_num_classes as get_trec_num_classes,
 )
 from data.csv_dataset import get_csv_datasets
+from data.subsequence import get_subsequence_datasets
 from models.mlp import MLP
 from models.transformer import GrokTransformer
 from models.transformer_decoder import GrokTransformerDecoder
@@ -59,7 +60,7 @@ def parse_args(argv=None) -> argparse.Namespace:
 
     # Dataset
     p.add_argument('--dataset', type=str, default='modular_arithmetic',
-                   choices=['modular_arithmetic', 'trec', 'csv'],
+                   choices=['modular_arithmetic', 'trec', 'csv', 'subsequence'],
                    help='Dataset to use.')
     p.add_argument('--csv_path', type=str, default='data/questions-words.csv',
                    help='Path to analogy CSV when --dataset csv.')
@@ -80,6 +81,14 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument('--max_dataset_size', type=int, default=-1,
                    help='Cap total examples before train/test split. '
                         'Useful for large datasets like ag_news (default: no cap).')
+    p.add_argument('--subsequence_vocab_size', type=int, default=50,
+                   help='Vocabulary size for the repeated-subsequence task.')
+    p.add_argument('--subsequence_seq_len', type=int, default=64,
+                   help='Raw sequence length before shift for next-token labels.')
+    p.add_argument('--subsequence_len', type=int, default=8,
+                   help='Length of repeated subsequence pattern.')
+    p.add_argument('--subsequence_num_samples', type=int, default=4096,
+                   help='Total generated samples for repeated-subsequence dataset.')
 
     # Model
     p.add_argument('--model', type=str, default='transformer',
@@ -173,6 +182,17 @@ def make_exp_name(args) -> str:
             f"_frac{args.train_fraction}"
             f"_seed{args.seed}"
         )
+    elif args.dataset == 'subsequence':
+        return (
+            f"{args.model}_subseq"
+            f"_v{args.subsequence_vocab_size}"
+            f"_L{args.subsequence_seq_len}"
+            f"_k{args.subsequence_len}"
+            f"_n{args.subsequence_num_samples}"
+            f"_wd{args.weight_decay}"
+            f"_frac{args.train_fraction}"
+            f"_seed{args.seed}"
+        )
     else:
         return (
             f"{args.model}_{args.dataset}"
@@ -225,6 +245,16 @@ def build_datasets(args):
     elif args.dataset == 'csv':
         train_ds, test_ds, vocab_size, output_dim, seq_len = get_csv_datasets(
             csv_path=args.csv_path,
+            train_fraction=args.train_fraction,
+            seed=args.seed,
+        )
+        return train_ds, test_ds, vocab_size, output_dim, seq_len
+    elif args.dataset == 'subsequence':
+        train_ds, test_ds, vocab_size, output_dim, seq_len = get_subsequence_datasets(
+            vocab_size=args.subsequence_vocab_size,
+            seq_len=args.subsequence_seq_len,
+            subseq_len=args.subsequence_len,
+            num_samples=args.subsequence_num_samples,
             train_fraction=args.train_fraction,
             seed=args.seed,
         )
