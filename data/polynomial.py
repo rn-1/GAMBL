@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a text-based polynomial evaluation dataset.
+"""Generate a polynomial text dataset with train.py-compatible CSV output.
 
 Each example is a string-to-string mapping such as:
 
@@ -11,10 +11,19 @@ The generator randomizes:
 - coefficient encodings (decimal, signed, zero-padded, words, roman numerals)
 - formatting details (spaces, separators, equation style)
 
-By default it writes JSONL files for train/val/test splits.
+By default it writes a single CSV with columns compatible with
+`data/csv_dataset.py` and `train.py --dataset csv`:
+
+    word_one, word_two, word_three, word_four
+
+Each generated row encodes one polynomial example as:
+    word_one  = polynomial definition text
+    word_two  = variable assignment text
+    word_three= task cue text ("predict value")
+    word_four = target output text
 
 Example:
-    python polynomial_text_dataset_generator.py \
+    python polynomial.py \
         --outdir data/poly_eval \
         --num_examples 20000 \
         --max_degree 4 \
@@ -26,6 +35,7 @@ Example:
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import math
 import random
@@ -294,6 +304,30 @@ def write_txt(path: Path, examples: Sequence[Example]) -> None:
             f.write("\n")
 
 
+def write_trainpy_csv(path: Path, examples: Sequence[Example]) -> None:
+    """Write one CSV consumable by `train.py --dataset csv`.
+
+    The loader requires columns: word_one, word_two, word_three, word_four.
+    Additional columns are safe and ignored by the loader.
+    """
+    with path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["row_id", "category", "word_one", "word_two", "word_three", "word_four"])
+        for i, ex in enumerate(examples):
+            # Build a structured prompt split across 3 fields.
+            # word_four remains the target text to be generated.
+            poly_text = ex.metadata.get("poly_text", ex.input_text)
+            x_assign = ex.metadata.get("x_assign", "")
+            writer.writerow([
+                i,
+                "polynomial-eval",
+                str(poly_text),
+                str(x_assign),
+                "predict value",
+                ex.output_text,
+            ])
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Generate a text polynomial evaluation dataset.")
     p.add_argument("--outdir", type=str, default="poly_eval_dataset", help="Output directory.")
@@ -304,7 +338,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--seed", type=int, default=42, help="Random seed.")
     p.add_argument("--train_frac", type=float, default=0.9, help="Train split fraction.")
     p.add_argument("--val_frac", type=float, default=0.05, help="Validation split fraction.")
-    p.add_argument("--jsonl", action="store_true", help="Write JSONL files (default).")
+    p.add_argument("--csv_name", type=str, default="polynomial_analogies.csv",
+                   help="CSV filename written to outdir for train.py --dataset csv.")
+    p.add_argument("--jsonl", action="store_true", help="Also write JSONL files.")
     p.add_argument("--txt", action="store_true", help="Also write plain text files.")
     return p.parse_args()
 
@@ -334,10 +370,35 @@ def main() -> None:
     rng.shuffle(examples)
     train, val, test = split_examples(examples, args.train_frac, args.val_frac)
 
-    # Default output: JSONL.
-    write_jsonl(outdir / "train.jsonl", train)
-    write_jsonl(outdir / "val.jsonl", val)
-    write_jsonl(outdir / "test.jsonl", test)
+    # Build metadata fields used by CSV writer.
+    # We derive poly/x assignment by splitting around separators from input_text.
+    all_examples = []
+    for ex in examples:
+        input_text = ex.input_text
+        separator = None
+        for s in (" || ", " | ", "; ", " ; ", "|"):
+            if s in input_text:
+                separator = s
+                break
+        if separator is None and ";" in input_text:
+            separator = ";"
+        if separator is not None:
+            left, right = input_text.split(separator, 1)
+        else:
+            left, right = input_text, ""
+        md = dict(ex.metadata)
+        md["poly_text"] = left.strip()
+        md["x_assign"] = right.strip()
+        all_examples.append(Example(input_text=ex.input_text, output_text=ex.output_text, metadata=md))
+
+    # Default output: one train.py-compatible CSV (train.py does its own split).
+    write_trainpy_csv(outdir / args.csv_name, all_examples)
+
+    # Optional split outputs for inspection/other workflows.
+    if args.jsonl:
+        write_jsonl(outdir / "train.jsonl", train)
+        write_jsonl(outdir / "val.jsonl", val)
+        write_jsonl(outdir / "test.jsonl", test)
 
     if args.txt:
         write_txt(outdir / "train.txt", train)
@@ -358,7 +419,10 @@ def main() -> None:
     }
     (outdir / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
 
-    print(f"Wrote {len(train)} train, {len(val)} val, {len(test)} test examples to {outdir}")
+    print(
+        f"Wrote {len(all_examples)} CSV rows to {outdir / args.csv_name}. "
+        f"Split counts: train={len(train)}, val={len(val)}, test={len(test)}"
+    )
 
 
 if __name__ == "__main__":
