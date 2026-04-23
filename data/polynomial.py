@@ -14,13 +14,11 @@ The generator uses a strict numeric format:
 By default it writes a single CSV with columns compatible with
 `data/csv_dataset.py` and `train.py --dataset csv`:
 
-    word_one, word_two, word_three, word_four
+    input, output
 
 Each generated row encodes one polynomial example as:
-    word_one  = polynomial definition text
-    word_two  = variable assignment text
-    word_three= task cue text ("predict value")
-    word_four = target output text
+    input  = equation and x value (e.g. "2x^2+3x+1;x=4")
+    output = evaluated numeric result (e.g. "45")
 
 Example:
     python polynomial.py \
@@ -287,23 +285,14 @@ def write_txt(path: Path, examples: Sequence[Example]) -> None:
 def write_trainpy_csv(path: Path, examples: Sequence[Example]) -> None:
     """Write one CSV consumable by `train.py --dataset csv`.
 
-    The loader requires columns: word_one, word_two, word_three, word_four.
+    The loader expects columns: input, output.
     Additional columns are safe and ignored by the loader.
     """
     with path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["row_id", "category", "word_one", "word_two", "word_three", "word_four"])
-        for i, ex in enumerate(examples):
-            poly_text = ex.metadata.get("poly_text", ex.input_text)
-            x_assign = ex.metadata.get("x_assign", "0")
-            writer.writerow([
-                i,
-                "polynomial-eval",
-                str(poly_text),
-                str(x_assign),
-                "0",
-                ex.output_text,
-            ])
+        writer.writerow(["input", "output"])
+        for ex in examples:
+            writer.writerow([ex.input_text, ex.output_text])
 
 
 def parse_args() -> argparse.Namespace:

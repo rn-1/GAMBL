@@ -1,13 +1,14 @@
-"""CSV-backed analogy datasets for grokking experiments.
+"""CSV-backed generative datasets for grokking experiments.
 
-The expected CSV layout is four columns named:
+Preferred CSV layout is two columns:
+    input, output
+
+Each row contributes one generative sample:
+    prompt: input
+    target: output
+
+For backward compatibility, legacy analogy columns are also supported:
     word_one, word_two, word_three, word_four
-
-Each row contributes one generative analogy sample:
-    prompt:  "word_one:word_two::word_three->"
-    target:  "word_four"
-
-This represents: "word_one relates to word_two as word_three relates to ?".
 """
 
 from __future__ import annotations
@@ -20,7 +21,8 @@ import torch
 from torch.utils.data import Dataset
 
 
-REQUIRED_COLUMNS = ('word_one', 'word_two', 'word_three', 'word_four')
+REQUIRED_COLUMNS = ('input', 'output')
+LEGACY_COLUMNS = ('word_one', 'word_two', 'word_three', 'word_four')
 PAD_ID = 0
 EOS_ID = 1
 IGNORE_INDEX = -100
@@ -43,10 +45,12 @@ class CsvDataset(Dataset):
 
 def _read_csv(csv_path: str | Path) -> pd.DataFrame:
     frame = pd.read_csv(csv_path)
-    missing = [column for column in REQUIRED_COLUMNS if column not in frame.columns]
-    if missing:
+    has_preferred = all(column in frame.columns for column in REQUIRED_COLUMNS)
+    has_legacy = all(column in frame.columns for column in LEGACY_COLUMNS)
+    if not has_preferred and not has_legacy:
         raise ValueError(
-            f"CSV file must contain columns {list(REQUIRED_COLUMNS)}; missing {missing}"
+            "CSV file must contain either columns "
+            f"{list(REQUIRED_COLUMNS)} or {list(LEGACY_COLUMNS)}"
         )
     return frame
 
@@ -85,11 +89,15 @@ def get_csv_datasets(
 
     frame = _read_csv(csv_path)
 
-    prompts = [
-        f"{str(a)}:{str(b)}::{str(c)}->"
-        for a, b, c in zip(frame['word_one'], frame['word_two'], frame['word_three'])
-    ]
-    targets = [str(v) for v in frame['word_four'].tolist()]
+    if all(column in frame.columns for column in REQUIRED_COLUMNS):
+        prompts = [str(v) for v in frame['input'].tolist()]
+        targets = [str(v) for v in frame['output'].tolist()]
+    else:
+        prompts = [
+            f"{str(a)}:{str(b)}::{str(c)}->"
+            for a, b, c in zip(frame['word_one'], frame['word_two'], frame['word_three'])
+        ]
+        targets = [str(v) for v in frame['word_four'].tolist()]
 
     vocab, vocab_size = _build_char_vocab(prompts + targets)
 
