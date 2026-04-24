@@ -81,7 +81,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument('--max_dataset_size', type=int, default=-1,
                    help='Cap total examples before train/test split. '
                         'Useful for large datasets like ag_news (default: no cap).')
-    p.add_argument('--subsequence_vocab_size', type=int, default=50,
+    p.add_argument('--subsequence_vocab_size', type=int, default=10,
                    help='Vocabulary size for the repeated-subsequence task.')
     p.add_argument('--subsequence_seq_len', type=int, default=64,
                    help='Raw sequence length before shift for next-token labels.')
