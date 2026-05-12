@@ -20,6 +20,9 @@ import time
 from pathlib import Path
 from queue import Queue
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
 from sweeps import SWEEPS
 
 
@@ -79,7 +82,7 @@ def main():
 
     gpus = [int(g) for g in args.gpus.split(',') if g.strip() != '']
     configs = SWEEPS[args.sweep]
-    out_dir = Path(args.out_dir) if args.out_dir else Path('results') / args.sweep
+    out_dir = Path(args.out_dir) if args.out_dir else _REPO_ROOT / 'results' / args.sweep
     log_dir = out_dir / 'logs'
     out_dir.mkdir(parents=True, exist_ok=True)
     log_dir.mkdir(parents=True, exist_ok=True)

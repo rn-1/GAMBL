@@ -14,6 +14,9 @@ import json
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
 import torch
 
 from grok_lib import (
@@ -45,7 +48,7 @@ def parse_args():
     p.add_argument('--max-seq-len', type=int, default=128, help='ignored for modular arithmetic (uses 3)')
     p.add_argument('--max-dataset-size', type=int, default=-1)
     p.add_argument('--seed', type=int, default=42)
-    p.add_argument('--out-dir', type=Path, default=Path('results'))
+    p.add_argument('--out-dir', type=Path, default=_REPO_ROOT / 'results')
     p.add_argument('--grok-threshold', type=float, default=0.75)
     p.add_argument('--mod-p', type=int, default=97, help='prime modulus for modular arithmetic')
     p.add_argument('--checkpoint-every', type=int, default=0,
