@@ -1,0 +1,22 @@
+# Sweep over model size (width × depth) to study how parameter count affects
+# grokking onset and speed.
+#
+# sweep_zip varies d_model / n_heads / d_ff together so that:
+#   - head dimension stays fixed at 32 (d_model / n_heads = 32)
+#   - feed-forward dim stays at 4× d_model (standard transformer ratio)
+# This gives three iso-shaped models differing only in width.
+#
+# sweep varies n_layers (depth) independently, crossed with every width.
+#
+# Total: 3 widths × 4 depths × 3 seeds = 36 jobs.
+# Approximate parameter counts (embedding + 2-layer standard transformer):
+#   d_model= 64: ~0.5 M   d_model=128: ~1.6 M   d_model=256: ~5.8 M
+#   (× n_layers scaling of attention + FF blocks)
+base_config: configs/base.yaml
+sweep:
+  n_layers: [1, 2, 4, 6]
+  seed: [0, 1, 2]
+sweep_zip:
+  - {d_model: 64,  n_heads: 2, d_ff: 256}
+  - {d_model: 128, n_heads: 4, d_ff: 512}
+  - {d_model: 256, n_heads: 8, d_ff: 1024}

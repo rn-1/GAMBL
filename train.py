@@ -33,7 +33,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from data.modular_arithmetic import get_modular_arithmetic_datasets, get_vocab_size
-from data.text_datasets import list_datasets as list_text_datasets
+from data.text_datasets import get_text_datasets, list_datasets as list_text_datasets
 from data.text_classification import (
     get_trec_datasets,
     get_vocab_size as get_trec_vocab_size,
@@ -42,6 +42,7 @@ from data.text_classification import (
 from data.scan_dataset import get_scan_datasets
 from data.csv_dataset import get_csv_datasets
 from data.subsequence import get_subsequence_datasets
+from data.analogy import get_analogy_datasets, get_analogy_vocab_size, SEQ_LEN as ANALOGY_SEQ_LEN
 from models.mlp import MLP
 from models.transformer import GrokTransformer
 from models.transformer_decoder import GrokTransformerDecoder
@@ -61,7 +62,7 @@ def parse_args(argv=None) -> argparse.Namespace:
 
     # Dataset
     p.add_argument('--dataset', type=str, default='modular_arithmetic',
-                   choices=['modular_arithmetic', 'trec', 'text', 'scan', 'csv', 'ruletaker', 'subsequence'],
+                   choices=['modular_arithmetic', 'trec', 'text', 'scan', 'csv', 'ruletaker', 'subsequence', 'analogy'],
                    help='Dataset to use.')
     p.add_argument('--csv_path', type=str, default='data/questions-words.csv',
                    help='Path to analogy CSV when --dataset csv.')
@@ -86,6 +87,11 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help='Max sequence length for text datasets (TREC etc.).')
     p.add_argument('--prime', type=int, default=97,
                    help='Prime modulus p for modular arithmetic.')
+    # Analogy-dataset-specific
+    p.add_argument('--analogy_rows', type=int, default=5,
+                   help='P: number of rows in the entity grid (Z_P component) for analogy dataset.')
+    p.add_argument('--analogy_cols', type=int, default=5,
+                   help='Q: number of columns in the entity grid (Z_Q component) for analogy dataset.')
     p.add_argument('--operation', type=str, default='+',
                    choices=['+', '-', '*', '/'],
                    help='Arithmetic operation.')
@@ -99,14 +105,6 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument('--max_dataset_size', type=int, default=-1,
                    help='Cap total examples before train/test split. '
                         'Useful for large datasets like ag_news (default: no cap).')
-    p.add_argument('--subsequence_vocab_size', type=int, default=10,
-                   help='Vocabulary size for the repeated-subsequence task.')
-    p.add_argument('--subsequence_seq_len', type=int, default=64,
-                   help='Raw sequence length before shift for next-token labels.')
-    p.add_argument('--subsequence_len', type=int, default=8,
-                   help='Length of repeated subsequence pattern.')
-    p.add_argument('--subsequence_num_samples', type=int, default=4096,
-                   help='Total generated samples for repeated-subsequence dataset.')
 
     # Model
     p.add_argument('--model', type=str, default='transformer',
@@ -184,6 +182,9 @@ def get_device(device_str: str) -> torch.device:
 
 
 def make_exp_name(args) -> str:
+    size_sfx = f"_d{args.d_model}_l{args.n_layers}" if (args.d_model != 128 or args.n_layers != 2) else ""
+    drop_sfx = f"_do{args.dropout}"                 if  args.dropout != 0.1                        else ""
+
     if args.dataset == 'modular_arithmetic':
         op_name = {'+': 'plus', '-': 'minus', '*': 'times', '/': 'div'}[args.operation]
         return (
@@ -191,6 +192,15 @@ def make_exp_name(args) -> str:
             f"_wd{args.weight_decay}"
             f"_frac{args.train_fraction}"
             f"_seed{args.seed}"
+            f"{size_sfx}{drop_sfx}"
+        )
+    elif args.dataset == 'analogy':
+        return (
+            f"{args.model}_analogy_p{args.analogy_rows}q{args.analogy_cols}"
+            f"_wd{args.weight_decay}"
+            f"_frac{args.train_fraction}"
+            f"_seed{args.seed}"
+            f"{size_sfx}{drop_sfx}"
         )
     elif args.dataset == 'csv':
         csv_stem = os.path.splitext(os.path.basename(args.csv_path))[0]
@@ -217,6 +227,7 @@ def make_exp_name(args) -> str:
             f"_wd{args.weight_decay}"
             f"_frac{args.train_fraction}"
             f"_seed{args.seed}"
+            f"{size_sfx}{drop_sfx}"
         )
 
 
@@ -248,8 +259,26 @@ def build_datasets(args):
         )
         vocab_size = get_vocab_size(args.prime)
         output_dim = args.prime
-        seq_len = 4
-        return train_ds, test_ds, vocab_size, output_dim, seq_len
+        return train_ds, test_ds, vocab_size, output_dim, 4
+    elif args.dataset == 'analogy':
+        train_ds, test_ds = get_analogy_datasets(
+            p=args.analogy_rows,
+            q=args.analogy_cols,
+            train_fraction=args.train_fraction,
+            seed=args.seed,
+        )
+        vocab_size = get_analogy_vocab_size(args.analogy_rows, args.analogy_cols)
+        output_dim = args.analogy_rows * args.analogy_cols
+        return train_ds, test_ds, vocab_size, output_dim, ANALOGY_SEQ_LEN
+    elif args.dataset == 'text':
+        if args.hf_dataset is None:
+            raise ValueError("--hf_dataset is required when --dataset text")
+        train_ds, test_ds, vocab_size, num_classes = get_text_datasets(
+            dataset_name=args.hf_dataset,
+            train_fraction=args.train_fraction,
+            seed=args.seed,
+        )
+        return train_ds, test_ds, vocab_size, num_classes, args.max_seq_len
     elif args.dataset == 'trec':
         train_ds, test_ds = get_trec_datasets(
             max_seq_len=args.max_seq_len,
@@ -258,8 +287,7 @@ def build_datasets(args):
         )
         vocab_size = get_trec_vocab_size()
         output_dim = get_trec_num_classes()
-        seq_len = args.max_seq_len
-        return train_ds, test_ds, vocab_size, output_dim, seq_len
+        return train_ds, test_ds, vocab_size, output_dim, args.max_seq_len
     elif args.dataset == 'scan':
         train_ds, test_ds, vocab_size, num_classes = get_scan_datasets(
             split=args.scan_split,
@@ -267,8 +295,7 @@ def build_datasets(args):
             seed=args.seed,
             max_seq_len=args.max_seq_len,
         )
-        seq_len = args.max_seq_len
-        return train_ds, test_ds, vocab_size, num_classes, seq_len
+        return train_ds, test_ds, vocab_size, num_classes, args.max_seq_len
     elif args.dataset == 'ruletaker':
         from data.ruletaker_dataset import get_ruletaker_datasets
         train_ds, test_ds, vocab_size, num_classes = get_ruletaker_datasets(
@@ -279,8 +306,7 @@ def build_datasets(args):
             depth=None if args.ruletaker_depth == 'none' else args.ruletaker_depth,
             max_context_words=args.ruletaker_max_context_words,
         )
-        seq_len = args.max_seq_len
-        return train_ds, test_ds, vocab_size, num_classes, seq_len
+        return train_ds, test_ds, vocab_size, num_classes, args.max_seq_len
     elif args.dataset == 'csv':
         train_ds, test_ds, vocab_size, output_dim, seq_len = get_csv_datasets(
             csv_path=args.csv_path,
@@ -394,13 +420,13 @@ def train(args):
     # ---- data -----------------------------------------------------------
     train_ds, test_ds, vocab_size, output_dim, seq_len = build_datasets(args)
     print(f"Train size: {len(train_ds)}, Test size: {len(test_ds)}, "
-          f"Vocab size: {vocab_size}, Output dim: {output_dim}")
+          f"Vocab size: {vocab_size}, Output dim: {output_dim}, Seq len: {seq_len}")
 
     batch_size = len(train_ds) if args.batch_size == -1 else args.batch_size
     train_loader = make_infinite_loader(train_ds, batch_size=batch_size)
 
     # For evaluation, load everything at once.
-    # TextDataset exposes a padding_mask attribute; ModularArithmeticDataset does not.
+    # TextDataset exposes a padding_mask attribute; the others do not.
     test_inputs  = test_ds.inputs.to(device)
     test_labels  = test_ds.labels.to(device)
     train_inputs = train_ds.inputs.to(device)

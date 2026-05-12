@@ -1,0 +1,8 @@
+# Sweep: weight decay on the analogy task.
+# Mirrors sweep_weight_decay.yaml for modular arithmetic.
+# Grokking requires non-zero weight decay; wd=0 should memorise but not generalise.
+# Total: 5 wd values × 3 seeds = 15 jobs.
+base_config: configs/analogy_base.yaml
+sweep:
+  weight_decay: [0.0, 0.1, 0.5, 1.0, 5.0]
+  seed: [0, 1, 2]
