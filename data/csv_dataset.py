@@ -1,14 +1,14 @@
-"""CSV-backed datasets for grokking experiments.
+"""CSV-backed generative datasets for grokking experiments.
 
-The expected CSV layout is four columns named:
-  word_one, word_two, word_three, word_four
+Preferred CSV layout is two columns:
+    input, output
 
-Each row contributes two samples:
-  - (word_one, word_two)    -> train input / label
-  - (word_three, word_four) -> test input / label
+Each row contributes one generative sample:
+    prompt: input
+    target: output
 
-The loader keeps the rest of the training pipeline unchanged by returning
-the same dataset shape as the modular-arithmetic loader.
+For backward compatibility, legacy analogy columns are also supported:
+    word_one, word_two, word_three, word_four
 """
 
 from __future__ import annotations
@@ -21,7 +21,11 @@ import torch
 from torch.utils.data import Dataset
 
 
-REQUIRED_COLUMNS = ('word_one', 'word_two', 'word_three', 'word_four')
+REQUIRED_COLUMNS = ('input', 'output')
+LEGACY_COLUMNS = ('word_one', 'word_two', 'word_three', 'word_four')
+PAD_ID = 0
+EOS_ID = 1
+IGNORE_INDEX = -100
 
 
 class CsvDataset(Dataset):
@@ -41,80 +45,104 @@ class CsvDataset(Dataset):
 
 def _read_csv(csv_path: str | Path) -> pd.DataFrame:
     frame = pd.read_csv(csv_path)
-    missing = [column for column in REQUIRED_COLUMNS if column not in frame.columns]
-    if missing:
+    has_preferred = all(column in frame.columns for column in REQUIRED_COLUMNS)
+    has_legacy = all(column in frame.columns for column in LEGACY_COLUMNS)
+    if not has_preferred and not has_legacy:
         raise ValueError(
-            f"CSV file must contain columns {list(REQUIRED_COLUMNS)}; missing {missing}"
+            "CSV file must contain either columns "
+            f"{list(REQUIRED_COLUMNS)} or {list(LEGACY_COLUMNS)}"
         )
     return frame
 
 
-def _build_input_vocab(values: list[object]) -> tuple[dict[str, int], int]:
-    numeric_values: list[int] = []
-    all_numeric = True
-    for value in values:
-        try:
-            numeric_values.append(int(value))
-        except (TypeError, ValueError):
-            all_numeric = False
-            break
-
-    if all_numeric:
-        vocab_size = max(numeric_values) + 1 if numeric_values else 0
-        return {}, vocab_size
-
+def _build_char_vocab(texts: list[str]) -> tuple[dict[str, int], int]:
     vocab: OrderedDict[str, int] = OrderedDict()
-    for value in values:
-        key = str(value)
-        if key not in vocab:
-            vocab[key] = len(vocab)
-    return dict(vocab), len(vocab)
+    next_id = 2  # 0=<PAD>, 1=<EOS>
+    for text in texts:
+        for ch in text:
+            if ch not in vocab:
+                vocab[ch] = next_id
+                next_id += 1
+    return dict(vocab), next_id
 
 
-def _build_label_map(values: list[object]) -> tuple[dict[str, int], int]:
-    label_map: OrderedDict[str, int] = OrderedDict()
-    for value in values:
-        key = str(value)
-        if key not in label_map:
-            label_map[key] = len(label_map)
-    return dict(label_map), len(label_map)
+def _encode_text(text: str, vocab: dict[str, int]) -> list[int]:
+    return [vocab[ch] for ch in text]
 
 
-def _encode_inputs_with_vocab(values: list[object], vocab: dict[str, int]) -> torch.Tensor:
-    if vocab:
-        encoded = [vocab[str(value)] for value in values]
-    else:
-        encoded = [int(value) for value in values]
-    return torch.tensor(encoded, dtype=torch.long).unsqueeze(1)
+def _pad_2d(seqs: list[list[int]], pad_value: int) -> torch.Tensor:
+    max_len = max(len(seq) for seq in seqs)
+    out = torch.full((len(seqs), max_len), pad_value, dtype=torch.long)
+    for i, seq in enumerate(seqs):
+        out[i, :len(seq)] = torch.tensor(seq, dtype=torch.long)
+    return out
 
 
-def _encode_labels_with_map(values: list[object], label_map: dict[str, int]) -> torch.Tensor:
-    encoded = [label_map[str(value)] for value in values]
-    return torch.tensor(encoded, dtype=torch.long)
+def get_csv_datasets(
+    csv_path: str | Path,
+    train_fraction: float = 0.5,
+    seed: int = 42,
+) -> tuple[CsvDataset, CsvDataset, int, int, int]:
+    """Load CSV analogies for sequence generation and split by train_fraction."""
+    if not 0.0 < train_fraction < 1.0:
+        raise ValueError(f"train_fraction must be in (0, 1), got {train_fraction}")
 
-
-def get_csv_datasets(csv_path: str | Path) -> tuple[CsvDataset, CsvDataset, int, int, int]:
-    """Load a CSV where each row contributes one train sample and one test sample."""
     frame = _read_csv(csv_path)
 
-    train_inputs_raw = frame['word_one'].tolist()
-    train_labels_raw = frame['word_two'].tolist()
-    test_inputs_raw = frame['word_three'].tolist()
-    test_labels_raw = frame['word_four'].tolist()
+    if all(column in frame.columns for column in REQUIRED_COLUMNS):
+        prompts = [str(v) for v in frame['input'].tolist()]
+        targets = [str(v) for v in frame['output'].tolist()]
+    else:
+        prompts = [
+            f"{str(a)}:{str(b)}::{str(c)}->"
+            for a, b, c in zip(frame['word_one'], frame['word_two'], frame['word_three'])
+        ]
+        targets = [str(v) for v in frame['word_four'].tolist()]
 
-    all_input_values = train_inputs_raw + test_inputs_raw
-    all_label_values = train_labels_raw + test_labels_raw
+    vocab, vocab_size = _build_char_vocab(prompts + targets)
 
-    input_vocab, vocab_size = _build_input_vocab(all_input_values)
-    label_map, output_dim = _build_label_map(all_label_values)
+    # Build autoregressive training sequences.
+    # sequence = prompt + target + <EOS>
+    # input_ids = sequence[:-1], labels = sequence[1:]
+    # Ignore loss on prompt-prediction positions so we train relation transfer.
+    input_seqs: list[list[int]] = []
+    label_seqs: list[list[int]] = []
+    for prompt, target in zip(prompts, targets):
+        prompt_ids = _encode_text(prompt, vocab)
+        target_ids = _encode_text(target, vocab)
+        full_ids = prompt_ids + target_ids + [EOS_ID]
+        input_ids = full_ids[:-1]
+        labels = full_ids[1:]
 
-    train_inputs = _encode_inputs_with_vocab(train_inputs_raw, input_vocab)
-    test_inputs = _encode_inputs_with_vocab(test_inputs_raw, input_vocab)
+        prompt_cutoff = max(0, len(prompt_ids) - 1)
+        for i in range(prompt_cutoff):
+            labels[i] = IGNORE_INDEX
 
-    train_labels = _encode_labels_with_map(train_labels_raw, label_map)
-    test_labels = _encode_labels_with_map(test_labels_raw, label_map)
+        input_seqs.append(input_ids)
+        label_seqs.append(labels)
+
+    inputs = _pad_2d(input_seqs, PAD_ID)
+    labels = _pad_2d(label_seqs, IGNORE_INDEX)
+
+    n = len(input_seqs)
+    n_train = int(n * train_fraction)
+    n_train = max(1, min(n - 1, n_train))
+
+    generator = torch.Generator().manual_seed(seed)
+    indices = torch.randperm(n, generator=generator)
+    train_idx = indices[:n_train]
+    test_idx = indices[n_train:]
+
+    train_inputs = inputs[train_idx]
+    test_inputs = inputs[test_idx]
+    train_labels = labels[train_idx]
+    test_labels = labels[test_idx]
 
     train_ds = CsvDataset(train_inputs, train_labels)
     test_ds = CsvDataset(test_inputs, test_labels)
-    seq_len = 1
+    train_ds.padding_mask = train_inputs.eq(PAD_ID)
+    test_ds.padding_mask = test_inputs.eq(PAD_ID)
+
+    output_dim = vocab_size
+    seq_len = inputs.shape[1]
     return train_ds, test_ds, vocab_size, output_dim, seq_len

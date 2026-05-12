@@ -41,10 +41,12 @@ from data.text_classification import (
 )
 from data.scan_dataset import get_scan_datasets
 from data.csv_dataset import get_csv_datasets
+from data.subsequence import get_subsequence_datasets
 from models.mlp import MLP
 from models.transformer import GrokTransformer
 from models.transformer_decoder import GrokTransformerDecoder
 from models.transformer_encoder import GrokTransformerEncoder
+from models.transformer_lm import GrokTransformerLM
 
 
 # ---------------------------------------------------------------------------
@@ -59,10 +61,10 @@ def parse_args(argv=None) -> argparse.Namespace:
 
     # Dataset
     p.add_argument('--dataset', type=str, default='modular_arithmetic',
-                   choices=['modular_arithmetic', 'trec', 'text', 'scan', 'csv', 'ruletaker'],
+                   choices=['modular_arithmetic', 'trec', 'text', 'scan', 'csv', 'ruletaker', 'subsequence'],
                    help='Dataset to use.')
     p.add_argument('--csv_path', type=str, default='data/questions-words.csv',
-                   help='Path to CSV file for --dataset csv.')
+                   help='Path to analogy CSV when --dataset csv.')
     p.add_argument('--ruletaker_max_examples', type=int, default=15000,
                    help='Max examples to load from RuleTaker (--dataset ruletaker).')
     p.add_argument('--ruletaker_depth', type=str, default='depth-1',
@@ -72,6 +74,14 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument('--scan_split', type=str, default='simple',
                    choices=['simple', 'addprim_jump', 'addprim_turn_left'],
                    help='SCAN split to use.')
+    p.add_argument('--subsequence_vocab_size', type=int, default=10,
+                   help='Vocabulary size for the repeated-subsequence task.')
+    p.add_argument('--subsequence_seq_len', type=int, default=64,
+                   help='Raw sequence length before shift for next-token labels.')
+    p.add_argument('--subsequence_len', type=int, default=8,
+                   help='Length of repeated subsequence pattern.')
+    p.add_argument('--subsequence_num_samples', type=int, default=4096,
+                   help='Total generated samples for repeated-subsequence dataset.')
     p.add_argument('--max_seq_len', type=int, default=64,
                    help='Max sequence length for text datasets (TREC etc.).')
     p.add_argument('--prime', type=int, default=97,
@@ -89,10 +99,18 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument('--max_dataset_size', type=int, default=-1,
                    help='Cap total examples before train/test split. '
                         'Useful for large datasets like ag_news (default: no cap).')
+    p.add_argument('--subsequence_vocab_size', type=int, default=10,
+                   help='Vocabulary size for the repeated-subsequence task.')
+    p.add_argument('--subsequence_seq_len', type=int, default=64,
+                   help='Raw sequence length before shift for next-token labels.')
+    p.add_argument('--subsequence_len', type=int, default=8,
+                   help='Length of repeated subsequence pattern.')
+    p.add_argument('--subsequence_num_samples', type=int, default=4096,
+                   help='Total generated samples for repeated-subsequence dataset.')
 
     # Model
     p.add_argument('--model', type=str, default='transformer',
-                   choices=['transformer', 'transformer_decoder', 'transformer_encoder', 'mlp'],
+                   choices=['transformer', 'transformer_decoder', 'transformer_encoder', 'transformer_lm', 'mlp'],
                    help='Model architecture.')
     # Transformer-specific
     p.add_argument('--d_model', type=int, default=128)
@@ -174,6 +192,25 @@ def make_exp_name(args) -> str:
             f"_frac{args.train_fraction}"
             f"_seed{args.seed}"
         )
+    elif args.dataset == 'csv':
+        csv_stem = os.path.splitext(os.path.basename(args.csv_path))[0]
+        return (
+            f"{args.model}_csv_{csv_stem}"
+            f"_wd{args.weight_decay}"
+            f"_frac{args.train_fraction}"
+            f"_seed{args.seed}"
+        )
+    elif args.dataset == 'subsequence':
+        return (
+            f"{args.model}_subseq"
+            f"_v{args.subsequence_vocab_size}"
+            f"_L{args.subsequence_seq_len}"
+            f"_k{args.subsequence_len}"
+            f"_n{args.subsequence_num_samples}"
+            f"_wd{args.weight_decay}"
+            f"_frac{args.train_fraction}"
+            f"_seed{args.seed}"
+        )
     else:
         return (
             f"{args.model}_{args.dataset}"
@@ -185,7 +222,19 @@ def make_exp_name(args) -> str:
 
 def compute_accuracy(logits: torch.Tensor, labels: torch.Tensor) -> float:
     preds = logits.argmax(dim=-1)
+    if labels.dim() == 2:
+        # Sequence task with ignore_index masking (e.g. prompt tokens, padding).
+        valid = labels != -100
+        if valid.any():
+            return (preds[valid] == labels[valid]).float().mean().item()
+        return 0.0
     return (preds == labels).float().mean().item()
+
+
+def compute_loss(criterion: nn.Module, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+    if labels.dim() == 2 and logits.dim() == 3:
+        return criterion(logits.reshape(-1, logits.size(-1)), labels.reshape(-1))
+    return criterion(logits, labels)
 
 
 def build_datasets(args):
@@ -233,7 +282,21 @@ def build_datasets(args):
         seq_len = args.max_seq_len
         return train_ds, test_ds, vocab_size, num_classes, seq_len
     elif args.dataset == 'csv':
-        train_ds, test_ds, vocab_size, output_dim, seq_len = get_csv_datasets(args.csv_path)
+        train_ds, test_ds, vocab_size, output_dim, seq_len = get_csv_datasets(
+            csv_path=args.csv_path,
+            train_fraction=args.train_fraction,
+            seed=args.seed,
+        )
+        return train_ds, test_ds, vocab_size, output_dim, seq_len
+    elif args.dataset == 'subsequence':
+        train_ds, test_ds, vocab_size, output_dim, seq_len = get_subsequence_datasets(
+            vocab_size=args.subsequence_vocab_size,
+            seq_len=args.subsequence_seq_len,
+            subseq_len=args.subsequence_len,
+            num_samples=args.subsequence_num_samples,
+            train_fraction=args.train_fraction,
+            seed=args.seed,
+        )
         return train_ds, test_ds, vocab_size, output_dim, seq_len
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
@@ -264,6 +327,17 @@ def build_model(args, vocab_size: int, output_dim: int, seq_len: int) -> nn.Modu
             dropout=args.dropout,
             use_positional_encoding=not args.no_pos_encoding,
             pool=args.pool,
+        )
+    elif args.model == 'transformer_lm':
+        return GrokTransformerLM(
+            vocab_size=vocab_size,
+            d_model=args.d_model,
+            n_heads=args.n_heads,
+            n_layers=args.n_layers,
+            d_ff=args.d_ff,
+            max_seq_len=seq_len,
+            dropout=args.dropout,
+            use_positional_encoding=not args.no_pos_encoding,
         )
     elif args.model == 'mlp':
         return MLP(
@@ -348,7 +422,7 @@ def train(args):
         betas=tuple(args.betas),
         weight_decay=args.weight_decay,
     )
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(ignore_index=-100)
 
     # ---- logging --------------------------------------------------------
     csv_file = open(metrics_path, 'w', newline='')
@@ -371,7 +445,7 @@ def train(args):
 
         optimizer.zero_grad()
         logits = model(inputs, padding_mask=mask)
-        loss = criterion(logits, labels)
+        loss = compute_loss(criterion, logits, labels)
         loss.backward()
         optimizer.step()
 
@@ -381,12 +455,12 @@ def train(args):
             with torch.no_grad():
                 # Training metrics (full dataset for accurate reporting)
                 train_logits = model(train_inputs, padding_mask=train_mask)
-                train_loss = criterion(train_logits, train_labels).item()
+                train_loss = compute_loss(criterion, train_logits, train_labels).item()
                 train_acc = compute_accuracy(train_logits, train_labels)
 
                 # Test metrics
                 test_logits = model(test_inputs, padding_mask=test_mask)
-                test_loss = criterion(test_logits, test_labels).item()
+                test_loss = compute_loss(criterion, test_logits, test_labels).item()
                 test_acc = compute_accuracy(test_logits, test_labels)
 
             writer.writerow([step, train_loss, train_acc, test_loss, test_acc])

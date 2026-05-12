@@ -24,7 +24,13 @@ class TransformerBlock(nn.Module):
 
     def forward(self, x, padding_mask=None):
         normed = self.norm1(x)
-        attn_out, _ = self.attn(normed, normed, normed, need_weights=False)
+        attn_out, _ = self.attn(
+            normed,
+            normed,
+            normed,
+            key_padding_mask=padding_mask,
+            need_weights=False,
+        )
         x = x + attn_out
         x = x + self.ff(self.norm2(x))
         return x
@@ -58,7 +64,11 @@ class GrokTransformerEncoder(nn.Module):
         else:
             h = self.dropout(h)
         for block in self.blocks:
-            h = block(h)
+            h = block(h, padding_mask=padding_mask)
         h = self.norm(h)
-        pooled = h[:, -1, :] if self.pool == 'last' else h.mean(dim=1)
+        if self.pool == 'mean' and padding_mask is not None:
+            valid = (~padding_mask).float().unsqueeze(-1)
+            pooled = (h * valid).sum(dim=1) / valid.sum(dim=1).clamp(min=1)
+        else:
+            pooled = h[:, -1, :] if self.pool == 'last' else h.mean(dim=1)
         return self.head(pooled)

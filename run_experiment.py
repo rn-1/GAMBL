@@ -97,9 +97,28 @@ def make_exp_name(params: dict) -> str:
     frac  = params.get('train_fraction', 0.5)
     seed  = params.get('seed', 42)
 
-    if params.get('dataset', 'modular_arithmetic') == 'text':
-        hf_dataset = params.get('hf_dataset', 'unknown')
-        return f"{model}_text_{hf_dataset}_wd{wd}_frac{frac}_seed{seed}"
+    dataset = params.get('dataset', 'modular_arithmetic')
+    if dataset == 'csv':
+        csv_path = params.get('csv_path', 'data/questions-words.csv')
+        csv_stem = os.path.splitext(os.path.basename(csv_path))[0]
+        return f"{model}_csv_{csv_stem}_wd{wd}_frac{frac}_seed{seed}"
+    if dataset == 'subsequence':
+        subseq_vocab = params.get('subsequence_vocab_size', 50)
+        subseq_seq_len = params.get('subsequence_seq_len', 64)
+        subseq_len = params.get('subsequence_len', 8)
+        subseq_samples = params.get('subsequence_num_samples', 4096)
+        return (
+            f"{model}_subseq"
+            f"_v{subseq_vocab}"
+            f"_L{subseq_seq_len}"
+            f"_k{subseq_len}"
+            f"_n{subseq_samples}"
+            f"_wd{wd}"
+            f"_frac{frac}"
+            f"_seed{seed}"
+        )
+    if dataset != 'modular_arithmetic':
+        return f"{model}_{dataset}_wd{wd}_frac{frac}_seed{seed}"
 
     op_name = {'+': 'plus', '-': 'minus', '*': 'times', '/': 'div'}.get(
         params.get('operation', '+'), params.get('operation', '+')

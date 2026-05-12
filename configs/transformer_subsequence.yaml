@@ -1,0 +1,13 @@
+# Decoder-only transformer language model on repeated-subsequence next-token prediction.
+base_config: configs/base.yaml
+dataset: subsequence
+model: transformer_lm
+subsequence_vocab_size: 50
+subsequence_seq_len: 64
+subsequence_len: 8
+subsequence_num_samples: 4096
+train_fraction: 0.8
+weight_decay: 1.0
+n_steps: 50000
+batch_size: 128
+seed: 42
