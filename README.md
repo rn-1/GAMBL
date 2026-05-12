@@ -133,7 +133,7 @@ HuggingFace datasets are downloaded on first use and cached under the default
 ## Repository layout
 
 ```
-src/                Freddie's parallel sweep driver + shared library
+src/                parallel sweep driver + shared library
   grok_lib.py       models, datasets, train_model, analysis helpers
   run_sweep.py      parallel sweep driver
   run_single.py     single-config runner used by run_sweep
