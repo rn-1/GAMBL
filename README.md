@@ -20,14 +20,16 @@ HuggingFace:
 pip install datasets transformers
 ```
 
-Smoke test (under two minutes on a single GPU; falls back to CPU):
+Smoke test (under two minutes on a single GPU):
 
 ```bash
-python src/run_sweep.py smoke
+python src/run_sweep.py smoke --gpus 0
 ```
 
-This runs a tiny RTE sweep and writes outputs to `results/smoke/`. If it completes
-with `SWEEP SUMMARY` and no `FAIL`s, the install is good.
+This runs four short (500-step) configs --- two RTE, one modular addition, one
+multitask transformer --- and writes outputs to `results/smoke/`. If it completes
+with `SWEEP SUMMARY` and no `FAIL`s, the install is good. Pass
+`--gpus 0,1` to parallelize across two GPUs.
 
 ## Reproducing the paper
 
