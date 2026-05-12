@@ -22,7 +22,7 @@ class TransformerBlock(nn.Module):
             nn.Linear(d_ff, d_model), nn.Dropout(dropout),
         )
 
-    def forward(self, x):
+    def forward(self, x, padding_mask=None):
         normed = self.norm1(x)
         attn_out, _ = self.attn(normed, normed, normed, need_weights=False)
         x = x + attn_out
@@ -50,7 +50,7 @@ class GrokTransformerEncoder(nn.Module):
         nn.init.normal_(self.head.weight, std=0.02)
         nn.init.zeros_(self.head.bias)
 
-    def forward(self, x):
+    def forward(self, x, padding_mask=None):
         B, T = x.shape
         h = self.token_embedding(x)
         if self.pos_embedding is not None:

@@ -109,10 +109,10 @@ def get_trec_datasets(
 
     # Load only the train split — TREC's official test split is 500 examples
     # which is too small; we re-split the 5452-example train set instead.
-    raw = load_dataset("CogComp/trec", split="train", trust_remote_code=True)
+    raw = load_dataset("SetFit/TREC-QC", split="train")
 
     texts = [ex['text'] for ex in raw]
-    labels = [ex['coarse_label'] for ex in raw]
+    labels = [ex['label_coarse'] for ex in raw]
 
     n = len(texts)
     n_train = int(n * train_fraction)

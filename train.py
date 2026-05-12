@@ -39,6 +39,8 @@ from data.text_classification import (
     get_vocab_size as get_trec_vocab_size,
     get_num_classes as get_trec_num_classes,
 )
+from data.scan_dataset import get_scan_datasets
+from data.csv_dataset import get_csv_datasets
 from models.mlp import MLP
 from models.transformer import GrokTransformer
 from models.transformer_decoder import GrokTransformerDecoder
@@ -57,8 +59,19 @@ def parse_args(argv=None) -> argparse.Namespace:
 
     # Dataset
     p.add_argument('--dataset', type=str, default='modular_arithmetic',
-                   choices=['modular_arithmetic', 'trec'],
+                   choices=['modular_arithmetic', 'trec', 'text', 'scan', 'csv', 'ruletaker'],
                    help='Dataset to use.')
+    p.add_argument('--csv_path', type=str, default='data/questions-words.csv',
+                   help='Path to CSV file for --dataset csv.')
+    p.add_argument('--ruletaker_max_examples', type=int, default=15000,
+                   help='Max examples to load from RuleTaker (--dataset ruletaker).')
+    p.add_argument('--ruletaker_depth', type=str, default='depth-1',
+                   help='RuleTaker reasoning depth filter. Set to "none" for all depths.')
+    p.add_argument('--ruletaker_max_context_words', type=int, default=None,
+                   help='Filter RuleTaker to contexts with at most this many words.')
+    p.add_argument('--scan_split', type=str, default='simple',
+                   choices=['simple', 'addprim_jump', 'addprim_turn_left'],
+                   help='SCAN split to use.')
     p.add_argument('--max_seq_len', type=int, default=64,
                    help='Max sequence length for text datasets (TREC etc.).')
     p.add_argument('--prime', type=int, default=97,
@@ -197,6 +210,30 @@ def build_datasets(args):
         vocab_size = get_trec_vocab_size()
         output_dim = get_trec_num_classes()
         seq_len = args.max_seq_len
+        return train_ds, test_ds, vocab_size, output_dim, seq_len
+    elif args.dataset == 'scan':
+        train_ds, test_ds, vocab_size, num_classes = get_scan_datasets(
+            split=args.scan_split,
+            train_fraction=args.train_fraction,
+            seed=args.seed,
+            max_seq_len=args.max_seq_len,
+        )
+        seq_len = args.max_seq_len
+        return train_ds, test_ds, vocab_size, num_classes, seq_len
+    elif args.dataset == 'ruletaker':
+        from data.ruletaker_dataset import get_ruletaker_datasets
+        train_ds, test_ds, vocab_size, num_classes = get_ruletaker_datasets(
+            max_examples=args.ruletaker_max_examples,
+            train_fraction=args.train_fraction,
+            seed=args.seed,
+            max_seq_len=args.max_seq_len,
+            depth=None if args.ruletaker_depth == 'none' else args.ruletaker_depth,
+            max_context_words=args.ruletaker_max_context_words,
+        )
+        seq_len = args.max_seq_len
+        return train_ds, test_ds, vocab_size, num_classes, seq_len
+    elif args.dataset == 'csv':
+        train_ds, test_ds, vocab_size, output_dim, seq_len = get_csv_datasets(args.csv_path)
         return train_ds, test_ds, vocab_size, output_dim, seq_len
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
